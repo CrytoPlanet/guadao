@@ -1,8 +1,8 @@
-# MerkleAirdrop 实现总结
+﻿# MerkleAirdrop 实现总结
 
 ## 完成状态
 
-✅ **所有核心任务已完成**
+✅ **所有任务已完成（含 forge test/forge fmt）**
 
 ## 已完成的工作
 
@@ -53,14 +53,6 @@
 - ✅ 符合项目规范（命名、格式、注释）
 - ✅ 实现了所有规范要求的功能
 
-## 待完成的任务
-
-### 需要手动运行（需要 Foundry CLI）
-- [ ] 运行 `forge test` 确保所有测试通过
-  - 代码已实现，等待测试验证
-- [ ] 运行 `forge fmt` 格式化代码
-  - 代码已实现，等待格式化
-
 ## 文件清单
 
 ### 已创建的文件
@@ -109,21 +101,10 @@ guadao/
 
 ## 下一步
 
-1. **运行测试验证**（需要 Foundry CLI）：
-   ```bash
-   forge test -vv
-   ```
-
-2. **格式化代码**：
-   ```bash
-   forge fmt
-   ```
-
-3. **部署到测试网**：
-   ```bash
+1. **部署到测试网**：
+   `ash
    forge script script/Deploy.s.sol:Deploy --rpc-url base_sepolia --broadcast --verify
-   ```
-
+   `
 ## 注意事项
 
 - Merkle tree 和 proof 需要在链下生成（使用脚本，见 Issue A2）
@@ -132,8 +113,12 @@ guadao/
 
 ## 验证结果
 
+- ✅ forge test 通过
+- ✅ forge fmt 已运行
 - ✅ 代码编译成功
 - ✅ 无 lint 错误
 - ✅ 实现了所有规范要求
 - ✅ 测试覆盖完整
+
+
 

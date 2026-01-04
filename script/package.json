@@ -1,0 +1,10 @@
+{
+  "name": "guadao-merkle-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Merkle root and proof generator for GUA airdrops",
+  "dependencies": {
+    "ethers": "^5.7.2"
+  }
+}

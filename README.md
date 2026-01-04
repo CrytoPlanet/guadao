@@ -107,36 +107,53 @@
 
 ---
 
-## Repo Structure（建议）
+## Repo Structure
 
 ```text
 .
 ├── contracts/
-│   ├── TopicBountyEscrow.sol        # 投票 + 托管 + 10%/90% + 质疑/仲裁
-│   ├── MerkleAirdrop.sol            # 空投/贡献领取（Merkle Claim）
+│   └── GUAToken.sol                 # ✅ GUA Token 合约（ERC-20）
+│   ├── TopicBountyEscrow.sol        # 投票 + 托管 + 10%/90% + 质疑/仲裁（待实现）
+│   ├── MerkleAirdrop.sol            # 空投/贡献领取（Merkle Claim）（待实现）
 │   └── Treasury.sol (optional)      # v0.1 可只用地址，不一定要合约
 ├── script/
-│   ├── Deploy.s.sol                 # 部署脚本（Foundry）
-│   ├── GenerateMerkleRoot.ts        # 生成 Merkle root（可 Node）
+│   └── Deploy.s.sol                 # ✅ 部署脚本（Foundry）
+│   ├── GenerateMerkleRoot.js        # 生成 Merkle root（Node）
 │   └── SnapshotExample.csv          # 示例领取名单
 ├── test/
-│   ├── Airdrop.t.sol
-│   ├── Voting.t.sol
-│   ├── Delivery.t.sol
-│   ├── Dispute.t.sol
-│   └── Expiry.t.sol
+│   └── GUAToken.t.sol               # ✅ GUA Token 测试
+│   ├── Airdrop.t.sol                # （待实现）
+│   ├── Voting.t.sol                 # （待实现）
+│   ├── Delivery.t.sol               # （待实现）
+│   ├── Dispute.t.sol                # （待实现）
+│   └── Expiry.t.sol                 # （待实现）
 ├── docs/
-│   ├── spec-v0.1.md
-│   ├── pinned-comment-proof.md
-│   └── treasury-ops.md
-├── foundry.toml
-└── README.md
+│   ├── spec-v0.1.md                 # 系统规范
+│   ├── pinned-comment-proof.md      # 交付证明说明
+│   └── treasury-ops.md              # Treasury 操作说明
+├── openspec/                        # OpenSpec 规范驱动开发
+│   ├── project.md                   # 项目规范
+│   ├── specs/                       # 当前规范
+│   └── changes/                      # 变更提案
+├── issues/                          # 开发任务清单
+├── foundry.toml                     # ✅ Foundry 配置
+├── INSTALL.md                       # ✅ 安装说明
+└── README.md                        # 本文件
 ```
+
+**状态说明**：
+- ✅ 已完成
+- （待实现） 计划中
 
 ## Quick Start（Foundry）
 
 ### 1) Install Foundry
 ```bash
+# Windows (PowerShell)
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+
+# macOS / Linux
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
 ```
@@ -144,16 +161,32 @@ foundryup
 ### 2) Install dependencies
 ```bash
 forge install OpenZeppelin/openzeppelin-contracts --no-commit
-forge install foundry-rs/forge-std --no-commit
+# Forge Std 会随 OpenZeppelin 自动安装
 ```
 
-### 3) Test
+### 3) Build
+```bash
+forge build
+```
+
+### 4) Test
 ```bash
 forge test -vv
 ```
-### 4) Format
+
+### 5) Format
 ```bash
 forge fmt
+```
+
+### 6) Deploy (Base Sepolia Testnet)
+```bash
+# 设置环境变量
+export PRIVATE_KEY=your_private_key
+export BASE_ETHERSCAN_API_KEY=your_api_key
+
+# 部署到 Base Sepolia
+forge script script/Deploy.s.sol:Deploy --rpc-url base_sepolia --broadcast --verify
 ```
 
 ## Treasury Ops（重要）

@@ -7,6 +7,8 @@
 ✅ **使用（Voting / Staking）**：用 GUA 投票决定本期视频选题/决策  
 ✅ **兑现（Escrow → Reward）**：投票锁仓的币不是口嗨，会按条件自动发给 Topic Owner（创作者）  
 ✅ **持续（Emission / Incentive）**：空投发完后，贡献者还能持续获得 GUA（按贡献发放、按期领取）
+- 白皮书（Notion）：（https://www.notion.so/DAO-v0-1-1e1ed1b358148028bbddd80544f4467e?pvs=11）
+
 
 > ⚠️ 重要提示  
 > - 参与投票的锁仓 GUA **不会退回**：它进入“赏金池”，最终用于支付创作者或进入 Treasury。  

@@ -27,6 +27,7 @@ const STATE = {
   account: null,
   proofs: null,
   claimed: null,
+  config: null,
 };
 
 const AIRDROP_ABI = [
@@ -60,6 +61,18 @@ function parseProofJson(text) {
 
 function normalizeAddress(address) {
   return address ? address.toLowerCase() : "";
+}
+
+function autoFillProofIfAvailable() {
+  if (!STATE.proofs || !STATE.account) return;
+  const entry = STATE.proofs.proofs[normalizeAddress(STATE.account)];
+  if (!entry) return;
+  if (!elements.claimAmount.value) {
+    elements.claimAmount.value = entry.amount;
+  }
+  if (!elements.claimProof.value) {
+    elements.claimProof.value = JSON.stringify(entry.proof, null, 2);
+  }
 }
 
 function updateClaimStatusLabel() {
@@ -107,6 +120,18 @@ function updateNetworkStatus(chainId) {
   setText(elements.networkStatus, `${chainId}${suffix}`);
 }
 
+function applyConfigForChain(chainId) {
+  if (!STATE.config || !STATE.config.chains) return;
+  const entry = STATE.config.chains[String(chainId)];
+  if (!entry) return;
+  if (entry.airdropAddress) {
+    elements.contractAddress.value = entry.airdropAddress;
+  }
+  if (entry.proofsUrl) {
+    elements.proofsUrl.value = entry.proofsUrl;
+  }
+}
+
 async function connectWallet() {
   if (!window.ethereum) {
     setText(elements.walletStatus, "No wallet detected");
@@ -124,9 +149,12 @@ async function connectWallet() {
   setText(elements.walletAddress, shortAddress(STATE.account));
   elements.recipientAddress.value = STATE.account;
   const network = await STATE.provider.getNetwork();
+  elements.targetChain.value = String(network.chainId);
+  applyConfigForChain(network.chainId);
   updateNetworkStatus(network.chainId);
   STATE.claimed = null;
   updateClaimStatusLabel();
+  autoFillProofIfAvailable();
   await updateClaimedFlag();
 }
 
@@ -146,6 +174,7 @@ async function loadProofsFromUrl() {
     STATE.proofs = parseProofJson(JSON.stringify(json));
     setText(elements.proofsStatus, "Proofs loaded.");
     updateClaimStatusLabel();
+    autoFillProofIfAvailable();
   } catch (error) {
     setText(elements.proofsStatus, `Failed to load proofs: ${error.message}`);
   }
@@ -161,6 +190,7 @@ async function loadProofsFromFile(event) {
       STATE.proofs = parseProofJson(reader.result);
       setText(elements.proofsStatus, "Proofs loaded.");
       updateClaimStatusLabel();
+      autoFillProofIfAvailable();
     } catch (error) {
       setText(elements.proofsStatus, `Failed to parse proofs: ${error.message}`);
     }
@@ -251,8 +281,11 @@ function bindEvents() {
   elements.fillFromProofs.addEventListener("click", fillFromProofs);
   elements.claimButton.addEventListener("click", claimTokens);
   elements.targetChain.addEventListener("change", () => {
-    if (!STATE.provider) return;
-    STATE.provider.getNetwork().then((network) => updateNetworkStatus(network.chainId));
+    const chainId = Number(elements.targetChain.value);
+    applyConfigForChain(chainId);
+    if (STATE.provider) {
+      STATE.provider.getNetwork().then((network) => updateNetworkStatus(network.chainId));
+    }
   });
 
   if (window.ethereum) {
@@ -261,4 +294,25 @@ function bindEvents() {
   }
 }
 
+async function loadConfig() {
+  try {
+    const response = await fetch("config.json", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    STATE.config = json;
+    if (json.defaultChainId) {
+      elements.targetChain.value = String(json.defaultChainId);
+      applyConfigForChain(json.defaultChainId);
+    }
+    if (elements.proofsUrl.value) {
+      loadProofsFromUrl();
+    }
+  } catch (error) {
+    setText(elements.proofsStatus, "Config not loaded; using manual input.");
+  }
+}
+
 bindEvents();
+loadConfig();

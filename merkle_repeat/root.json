@@ -1,10 +1,10 @@
 {
-  "merkleRoot": "0xd9957bf06ef241d02660d3ba3abad07c498c9f56db761c506b6936e1742cf638",
-  "totalEntries": 5,
+  "merkleRoot": "0x50288a79279e2d81dbf6e5e8d90a55f0a16344b15ccc3ff5a7a708f576fb379f",
+  "totalEntries": 50,
   "leafHash": "keccak256(abi.encodePacked(address, amount))",
   "sortLeaves": true,
   "sortPairs": true,
   "duplicateOdd": true,
   "inputFile": "script\\SnapshotExample.csv",
-  "generatedAt": "2026-01-04T19:33:02.628Z"
+  "generatedAt": "2026-01-04T21:00:41.873Z"
 }

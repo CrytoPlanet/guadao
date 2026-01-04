@@ -16,7 +16,7 @@ Acceptance Criteria
 Status
 
 ? Completed
-- Snapshot example expanded to 10 addresses (script/SnapshotExample.csv)
+- Snapshot example expanded to 50 addresses (script/SnapshotExample.csv)
 - Generated outputs: merkle/root.json and merkle/proofs.json
 - Docs: docs/merkle-generator.md
 Labels：script airdrop good first issue

@@ -3,8 +3,10 @@ pragma solidity ^0.8.33;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract TopicBountyEscrow is Ownable {
+contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
     enum ProposalStatus {
         Created,
         Voting,
@@ -85,6 +87,8 @@ contract TopicBountyEscrow is Ownable {
     );
     event DisputeResolved(uint256 indexed proposalId, address indexed resolver, bool approved);
     event Expired(uint256 indexed proposalId, uint256 amount);
+    event EscrowPaused(address indexed account);
+    event EscrowUnpaused(address indexed account);
 
     constructor(address _guaToken, address _owner, address _treasury) Ownable(_owner) {
         require(_guaToken != address(0), "TopicBountyEscrow: invalid token");
@@ -99,7 +103,7 @@ contract TopicBountyEscrow is Ownable {
         address[] calldata topicOwners,
         uint64 startTime,
         uint64 endTime
-    ) external onlyOwner returns (uint256 proposalId) {
+    ) external onlyOwner whenNotPaused returns (uint256 proposalId) {
         uint256 count = topicOwners.length;
         require(count >= 3 && count <= 5, "TopicBountyEscrow: invalid topic count");
         require(endTime > startTime, "TopicBountyEscrow: invalid window");
@@ -139,7 +143,7 @@ contract TopicBountyEscrow is Ownable {
         emit ProposalCreated(proposalId, startTime, endTime, topicIds, topicOwners);
     }
 
-    function finalizeVoting(uint256 proposalId) external {
+    function finalizeVoting(uint256 proposalId) external whenNotPaused {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Voting, "TopicBountyEscrow: not voting");
@@ -168,7 +172,9 @@ contract TopicBountyEscrow is Ownable {
         emit VotingFinalized(proposalId, winningTopicId, pool);
     }
 
-    function confirmWinnerAndPay10(uint256 proposalId) external onlyOwner {
+    function confirmWinnerAndPay10(
+        uint256 proposalId
+    ) external onlyOwner whenNotPaused nonReentrant {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.VotingFinalized, "TopicBountyEscrow: voting not finalized");
@@ -203,7 +209,7 @@ contract TopicBountyEscrow is Ownable {
         bytes32 youtubeUrlHash,
         bytes32 videoIdHash,
         bytes32 pinnedCodeHash
-    ) external {
+    ) external whenNotPaused {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Accepted, "TopicBountyEscrow: not accepted");
@@ -235,7 +241,7 @@ contract TopicBountyEscrow is Ownable {
         uint256 proposalId,
         bytes32 reasonHash,
         bytes32 evidenceHash
-    ) external {
+    ) external whenNotPaused nonReentrant {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status != ProposalStatus.Disputed, "TopicBountyEscrow: already disputed");
@@ -256,7 +262,7 @@ contract TopicBountyEscrow is Ownable {
         emit DeliveryChallenged(proposalId, msg.sender, reasonHash, evidenceHash);
     }
 
-    function finalizeDelivery(uint256 proposalId) external {
+    function finalizeDelivery(uint256 proposalId) external whenNotPaused nonReentrant {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Submitted, "TopicBountyEscrow: not submitted");
@@ -274,7 +280,7 @@ contract TopicBountyEscrow is Ownable {
         guaToken.transfer(winningTopic.owner, remaining90);
     }
 
-    function expireIfNoSubmission(uint256 proposalId) external {
+    function expireIfNoSubmission(uint256 proposalId) external whenNotPaused nonReentrant {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Accepted, "TopicBountyEscrow: not accepted");
@@ -289,7 +295,10 @@ contract TopicBountyEscrow is Ownable {
         emit Expired(proposalId, remaining90);
     }
 
-    function resolveDispute(uint256 proposalId, bool approve) external onlyOwner {
+    function resolveDispute(
+        uint256 proposalId,
+        bool approve
+    ) external onlyOwner whenNotPaused nonReentrant {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Disputed, "TopicBountyEscrow: not disputed");
@@ -324,14 +333,18 @@ contract TopicBountyEscrow is Ownable {
         emit DisputeResolved(proposalId, msg.sender, approve);
     }
 
-    function stakeVote(uint256 proposalId, uint256 topicId, uint256 amount) external {
+    function stakeVote(
+        uint256 proposalId,
+        uint256 topicId,
+        uint256 amount
+    ) external whenNotPaused nonReentrant {
         require(amount > 0, "TopicBountyEscrow: invalid amount");
         Proposal memory proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Voting, "TopicBountyEscrow: not voting");
         require(topicId < proposal.topicCount, "TopicBountyEscrow: invalid topic");
         require(
-            block.timestamp >= proposal.startTime && block.timestamp <= proposal.endTime,
+            block.timestamp >= proposal.startTime && block.timestamp < proposal.endTime,
             "TopicBountyEscrow: voting closed"
         );
 
@@ -348,5 +361,15 @@ contract TopicBountyEscrow is Ownable {
 
     function getTopic(uint256 proposalId, uint256 topicId) external view returns (Topic memory) {
         return topics[proposalId][topicId];
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+        emit EscrowPaused(msg.sender);
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+        emit EscrowUnpaused(msg.sender);
     }
 }

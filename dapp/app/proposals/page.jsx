@@ -22,6 +22,7 @@ import {
   statusInvalidAddress,
 } from '../../lib/status';
 import { useI18n } from '../components/LanguageProvider';
+import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
 
 const ESCROW_EVENTS_ABI = parseAbi([
@@ -137,6 +138,12 @@ export default function ProposalsPage() {
               value={escrowAddress}
               placeholder="0x..."
               onChange={(event) => setEscrowAddress(event.target.value)}
+            />
+            <ExplorerLink
+              chainId={chainId}
+              type="address"
+              value={escrowAddress}
+              label={t('status.contract.link')}
             />
           </label>
           <label className="field">

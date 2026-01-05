@@ -710,4 +710,52 @@ contract TopicBountyEscrowTest is Test {
         vm.expectRevert();
         escrow.resolveDispute(proposalId, true);
     }
+
+    function test_PauseBlocksCreateProposal() public {
+        escrow.pause();
+
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        vm.expectRevert("EnforcedPause()");
+        escrow.createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
+    }
+
+    function test_PauseBlocksStakeVote() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        token.mint(user1, 10 ether);
+        vm.prank(user1);
+        token.approve(address(escrow), 10 ether);
+
+        escrow.pause();
+
+        vm.prank(user1);
+        vm.expectRevert("EnforcedPause()");
+        escrow.stakeVote(proposalId, 0, 1 ether);
+    }
+
+    function test_UnpauseAllowsActions() public {
+        escrow.pause();
+        escrow.unpause();
+
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        assertEq(proposalId, 1);
+    }
 }

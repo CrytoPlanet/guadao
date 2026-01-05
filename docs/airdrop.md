@@ -1,4 +1,4 @@
-# Airdrop 领取指南 (Merkle Claim)
+﻿# Airdrop 领取指南 (Merkle Claim)
 
 这是一份面向普通用户的领取说明，帮助你理解什么是 Merkle airdrop，如何找到自己的 proof，并完成领取。
 
@@ -89,3 +89,19 @@ cast send <MERKLE_AIRDROP_ADDRESS> \
 - amount 错误
 - 已经领取过
 - 合约 root 已更新，但你用了旧的 proof
+
+---
+
+## 激励发放流程（运维）
+
+适用于“贡献领取”的周期性发放（每期/每周），步骤如下：
+
+1. 准备贡献快照（address + amount），生成新的 `proofs.json` 与 `root.json`
+2. 管理员更新合约 Merkle root（dApp 管理区或命令行）
+3. 公布新一期 `proofs.json` 地址，提醒用户领取
+4. 用小额地址测试 claim，确认新 root 生效
+
+推荐流程：
+
+- 先在测试网验证，再发布主网
+- 发布新 root 后，旧 proof 将失效

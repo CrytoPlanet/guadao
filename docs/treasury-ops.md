@@ -1,4 +1,4 @@
-# Treasury Ops（国库运维说明）— v0.1（中文）
+﻿# Treasury Ops（国库运维说明）— v0.1（中文）
 
 > **目的：** 这份文档面向 GUA 项目的运维/管理员，说明 Treasury（国库）在 v0.1 需要做哪些链上操作，才能保证系统闭环正常运行，尤其是 **质疑成功奖励** 的发放。
 
@@ -144,6 +144,13 @@ cast call <GUA_TOKEN_ADDRESS> \
 ## 8. v0.1 重要结论（一句话）
 
 只要你希望“质疑成功奖励”能自动发放，就必须让 Treasury 提前给 Escrow 合约足够的 allowance。
+
+---
+
+## 9. 运维补充（交易追踪与暂停）
+
+- 交易追踪：通过 BaseScan 查看交易哈希与合约地址（dApp 页面提供直达链接）
+- 紧急暂停：Admin 可使用 Pause/Unpause 暂停关键路径，排查后恢复
 ```makefile
 ::contentReference[oaicite:0]{index=0}
 ```

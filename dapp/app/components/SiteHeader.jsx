@@ -5,6 +5,7 @@ import { ConnectKitButton } from 'connectkit';
 import { useAccount } from 'wagmi';
 
 import { useI18n } from './LanguageProvider';
+import NetworkStatus from './NetworkStatus';
 
 const shortAddress = (address) =>
   address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
@@ -46,6 +47,7 @@ export default function SiteHeader() {
           )}
         </ConnectKitButton.Custom>
       </div>
+      <NetworkStatus />
     </header>
   );
 }

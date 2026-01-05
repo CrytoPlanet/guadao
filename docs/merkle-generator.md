@@ -1,4 +1,4 @@
-# Merkle 生成器脚本（Node.js）
+﻿# Merkle 生成器脚本（Node.js）
 
 用于从快照文件生成 Merkle root 与每个地址的 proof，规则与链上校验保持一致。
 

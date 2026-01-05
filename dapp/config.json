@@ -10,7 +10,8 @@
       "escrowAddress": "",
       "guaTokenAddress": "",
       "proofsUrl": "/merkle/proofs.json",
-      "rpcUrl": "https://mainnet.base.org"
+      "rpcUrl": "https://mainnet.base.org",
+      "explorerUrl": "https://basescan.org"
     },
     "84532": {
       "label": "Base Sepolia",
@@ -18,7 +19,8 @@
       "escrowAddress": "",
       "guaTokenAddress": "",
       "proofsUrl": "/merkle/proofs.json",
-      "rpcUrl": "https://sepolia.base.org"
+      "rpcUrl": "https://sepolia.base.org",
+      "explorerUrl": "https://sepolia.basescan.org"
     },
     "31337": {
       "label": "Local Anvil",
@@ -26,7 +28,8 @@
       "escrowAddress": "",
       "guaTokenAddress": "",
       "proofsUrl": "/merkle/proofs.json",
-      "rpcUrl": "http://localhost:8545"
+      "rpcUrl": "http://localhost:8545",
+      "explorerUrl": ""
     }
   }
 }

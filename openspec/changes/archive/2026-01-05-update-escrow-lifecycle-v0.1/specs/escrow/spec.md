@@ -1,4 +1,4 @@
-﻿## ADDED Requirements
+## ADDED Requirements
 ### Requirement: Proposal State Machine
 系统 SHALL 维护完整的 Proposal 状态机，以保证投票、交付、争议、完成与过期流程可验证。
 

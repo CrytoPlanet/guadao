@@ -25,6 +25,7 @@ import {
 } from '../../../lib/status';
 import { useI18n } from '../../components/LanguageProvider';
 import CopyButton from '../../components/CopyButton';
+import ExplorerLink from '../../components/ExplorerLink';
 import StatusNotice from '../../components/StatusNotice';
 
 const ESCROW_ABI = parseAbi([
@@ -44,7 +45,7 @@ const ESCROW_EVENTS_ABI = parseAbi([
 ]);
 
 const STATUS_LABELS = {
-  zh: ['已创建', '投票中', '投票已结束', '已确认', '已提交', '质疑中', '已完成', '已否决', '已过期'],
+  zh: ['已创建', '投票中', '投票结束', '已确认', '已提交', '质疑中', '已完成', '已拒绝', '已过期'],
   en: ['Created', 'Voting', 'Voting ended', 'Accepted', 'Submitted', 'Disputed', 'Completed', 'Denied', 'Expired'],
 };
 
@@ -255,6 +256,12 @@ export default function ProposalDetailPage() {
               value={escrowAddress}
               placeholder="0x..."
               onChange={(event) => setEscrowAddress(event.target.value)}
+            />
+            <ExplorerLink
+              chainId={chainId}
+              type="address"
+              value={escrowAddress}
+              label={t('status.contract.link')}
             />
           </label>
           <label className="field">

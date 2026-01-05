@@ -27,11 +27,14 @@ import {
 } from '../../lib/status';
 import { useI18n } from '../components/LanguageProvider';
 import CopyButton from '../components/CopyButton';
+import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
 
 const AIRDROP_ABI = parseAbi([
   'function claim(address to,uint256 amount,bytes32[] proof)',
   'function claimed(address account) view returns (bool)',
+  'function merkleRoot() view returns (bytes32)',
+  'function setMerkleRoot(bytes32 merkleRoot)',
 ]);
 
 const shortAddress = (address) =>
@@ -61,6 +64,10 @@ export default function AirdropPage() {
   const [claimAmount, setClaimAmount] = useState('');
   const [claimProof, setClaimProof] = useState('');
   const [claimStatus, setClaimStatus] = useState(statusReady());
+  const [rootInput, setRootInput] = useState('');
+  const [rootStatus, setRootStatus] = useState(statusReady());
+  const [lastTxHash, setLastTxHash] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
@@ -77,6 +84,15 @@ export default function AirdropPage() {
     args: address ? [address] : undefined,
     query: {
       enabled: isAddress(contractAddress) && Boolean(address),
+    },
+  });
+
+  const rootResult = useReadContract({
+    address: isAddress(contractAddress) ? contractAddress : undefined,
+    abi: AIRDROP_ABI,
+    functionName: 'merkleRoot',
+    query: {
+      enabled: isAddress(contractAddress),
     },
   });
 
@@ -116,6 +132,12 @@ export default function AirdropPage() {
     if (!entry) return t('airdrop.status.notEligible');
     return t('airdrop.status.eligible');
   })();
+
+  const steps = [
+    { label: t('airdrop.guide.connect'), done: isConnected },
+    { label: t('airdrop.guide.load'), done: Boolean(proofs) },
+    { label: t('airdrop.guide.claim'), done: claimStatus.kind === 'success' },
+  ];
 
   const loadProofsFromUrl = async () => {
     const url = proofsUrl.trim();
@@ -234,12 +256,55 @@ export default function AirdropPage() {
         functionName: 'claim',
         args: [recipientAddress, amount, proof],
       });
+      setLastTxHash(hash);
       setClaimStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setClaimStatus(statusTxConfirmed());
     } catch (error) {
       const message = error?.shortMessage || error?.message || 'Claim failed';
       setClaimStatus(statusError('status.error', { message }));
+    }
+  };
+
+  const handleSetRoot = async () => {
+    const root = rootInput.trim();
+    if (!isConnected) {
+      setRootStatus(statusError('airdrop.status.disconnected'));
+      return;
+    }
+    if (!isAddress(contractAddress)) {
+      setRootStatus(statusInvalidAddress());
+      return;
+    }
+    if (!/^0x[a-fA-F0-9]{64}$/.test(root)) {
+      setRootStatus(statusError('airdrop.admin.root.invalid'));
+      return;
+    }
+    if (chainMismatch) {
+      setRootStatus(statusNetworkMismatch());
+      return;
+    }
+    if (!publicClient) {
+      setRootStatus(statusNoRpc());
+      return;
+    }
+
+    try {
+      setRootStatus(statusTxSubmitted());
+      const hash = await writeContractAsync({
+        address: contractAddress,
+        abi: AIRDROP_ABI,
+        functionName: 'setMerkleRoot',
+        args: [root],
+      });
+      setLastTxHash(hash);
+      setRootStatus(statusTxConfirming());
+      await publicClient.waitForTransactionReceipt({ hash });
+      setRootStatus(statusTxConfirmed());
+      rootResult.refetch?.();
+    } catch (error) {
+      const message = error?.shortMessage || error?.message || 'Update failed';
+      setRootStatus(statusError('status.error', { message }));
     }
   };
 
@@ -250,6 +315,15 @@ export default function AirdropPage() {
           <p className="eyebrow">{t('airdrop.eyebrow')}</p>
           <h1>{t('airdrop.title')}</h1>
           <p className="lede">{t('airdrop.lede')}</p>
+          <div className="hero-actions">
+            <button
+              className="mode-toggle"
+              type="button"
+              onClick={() => setShowAdvanced((current) => !current)}
+            >
+              {showAdvanced ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+            </button>
+          </div>
         </div>
         <div className="status-card">
           <div className="status-row">
@@ -278,16 +352,39 @@ export default function AirdropPage() {
       </section>
 
       <section className="panel">
+        <h2>{t('airdrop.guide.title')}</h2>
+        <div className="guide">
+          {steps.map((step, index) => (
+            <div
+              key={step.label}
+              className={`guide-step${step.done ? ' done' : ''}${!step.done && index === 0 ? ' active' : ''}`}
+            >
+              <span className="badge">{index + 1}</span>
+              <span>{step.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
         <h2>{t('airdrop.config.title')}</h2>
         <div className="form-grid">
-          <label className="field">
-            <span>{t('airdrop.config.contract')}</span>
-            <input
-              value={contractAddress}
-              placeholder="0x..."
-              onChange={(event) => setContractAddress(event.target.value)}
-            />
-          </label>
+          {showAdvanced && (
+            <label className="field">
+              <span>{t('airdrop.config.contract')}</span>
+              <input
+                value={contractAddress}
+                placeholder="0x..."
+                onChange={(event) => setContractAddress(event.target.value)}
+              />
+              <ExplorerLink
+                chainId={chainId}
+                type="address"
+                value={contractAddress}
+                label={t('status.contract.link')}
+              />
+            </label>
+          )}
           <label className="field">
             <span>{t('airdrop.config.network')}</span>
             <select
@@ -319,13 +416,15 @@ export default function AirdropPage() {
       <section className="panel">
         <h2>{t('airdrop.proofs.title')}</h2>
         <div className="form-grid">
-          <label className="field">
-            <span>{t('airdrop.proofs.url')}</span>
-            <input
-              value={proofsUrl}
-              onChange={(event) => setProofsUrl(event.target.value)}
-            />
-          </label>
+          {showAdvanced && (
+            <label className="field">
+              <span>{t('airdrop.proofs.url')}</span>
+              <input
+                value={proofsUrl}
+                onChange={(event) => setProofsUrl(event.target.value)}
+              />
+            </label>
+          )}
           <button className="btn ghost" onClick={loadProofsFromUrl}>
             {t('airdrop.proofs.load')}
           </button>
@@ -334,6 +433,7 @@ export default function AirdropPage() {
             <input type="file" accept="application/json" onChange={loadProofsFromFile} />
           </label>
         </div>
+        {!showAdvanced && <p className="hint">{t('airdrop.proofs.hint')}</p>}
         <StatusNotice status={proofsStatus} />
       </section>
 
@@ -346,6 +446,7 @@ export default function AirdropPage() {
               value={recipientAddress}
               placeholder="0x..."
               onChange={(event) => setRecipientAddress(event.target.value)}
+              readOnly={!showAdvanced && Boolean(address)}
             />
           </label>
           <label className="field">
@@ -354,18 +455,22 @@ export default function AirdropPage() {
               value={claimAmount}
               placeholder="0"
               onChange={(event) => setClaimAmount(event.target.value)}
+              readOnly={!showAdvanced}
             />
           </label>
-          <label className="field full">
-            <span>{t('airdrop.claim.proof')}</span>
-            <textarea
-              value={claimProof}
-              rows="4"
-              placeholder='["0xabc...", "0xdef..."]'
-              onChange={(event) => setClaimProof(event.target.value)}
-            ></textarea>
-          </label>
+          {showAdvanced && (
+            <label className="field full">
+              <span>{t('airdrop.claim.proof')}</span>
+              <textarea
+                value={claimProof}
+                rows="4"
+                placeholder='["0xabc...", "0xdef..."]'
+                onChange={(event) => setClaimProof(event.target.value)}
+              ></textarea>
+            </label>
+          )}
         </div>
+        {!showAdvanced && <p className="hint">{t('airdrop.claim.hint')}</p>}
         <div className="actions">
           <button className="btn ghost" onClick={fillFromProofs}>
             {t('airdrop.claim.fill')}
@@ -375,7 +480,54 @@ export default function AirdropPage() {
           </button>
         </div>
         <StatusNotice status={claimStatus} />
+        <div className="status-row">
+          <span>{t('status.tx.latest')}</span>
+          <span className="inline-group">
+            {lastTxHash || '-'}
+            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+          </span>
+        </div>
       </section>
+
+      {showAdvanced && (
+        <section className="panel">
+          <h2>{t('airdrop.admin.title')}</h2>
+          <p className="hint">{t('airdrop.admin.hint')}</p>
+          <div className="form-grid">
+            <label className="field full">
+              <span>{t('airdrop.admin.root.current')}</span>
+              <div className="inline-group">
+                <input
+                  value={rootResult.data || ''}
+                  readOnly
+                />
+                <CopyButton value={rootResult.data} />
+              </div>
+            </label>
+            <label className="field full">
+              <span>{t('airdrop.admin.root.next')}</span>
+              <input
+                value={rootInput}
+                placeholder="0x..."
+                onChange={(event) => setRootInput(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="actions">
+            <button className="btn primary" onClick={handleSetRoot} disabled={isClaiming}>
+              {t('airdrop.admin.root.update')}
+            </button>
+          </div>
+          <StatusNotice status={rootStatus} />
+          <div className="status-row">
+            <span>{t('status.tx.latest')}</span>
+            <span className="inline-group">
+              {lastTxHash || '-'}
+              <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+            </span>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

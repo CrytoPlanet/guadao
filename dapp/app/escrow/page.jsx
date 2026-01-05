@@ -25,6 +25,7 @@ import {
 } from '../../lib/status';
 import { useI18n } from '../components/LanguageProvider';
 import CopyButton from '../components/CopyButton';
+import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
 
 const ESCROW_ABI = parseAbi([
@@ -42,7 +43,7 @@ const ERC20_ABI = parseAbi([
 ]);
 
 const STATUS_LABELS = {
-  zh: ['已创建', '投票中', '投票已结束', '已确认', '已提交', '质疑中', '已完成', '已否决', '已过期'],
+  zh: ['已创建', '投票中', '投票结束', '已确认', '已提交', '质疑中', '已完成', '已拒绝', '已过期'],
   en: ['Created', 'Voting', 'Voting ended', 'Accepted', 'Submitted', 'Disputed', 'Completed', 'Denied', 'Expired'],
 };
 
@@ -60,6 +61,17 @@ const formatDateTime = (timestamp) => {
   if (!timestamp) return '-';
   const date = new Date(Number(timestamp) * 1000);
   return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+};
+
+const makeNonce = () => {
+  if (typeof crypto === 'undefined' || !crypto.getRandomValues) {
+    return `${Date.now().toString(16)}${Math.floor(Math.random() * 1e6).toString(16)}`;
+  }
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 };
 
 const readField = (proposal, name, index) => {
@@ -81,9 +93,12 @@ export default function EscrowPage() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [videoId, setVideoId] = useState('');
   const [pinnedComment, setPinnedComment] = useState('');
+  const [templateNonce, setTemplateNonce] = useState('');
   const [challengeReason, setChallengeReason] = useState('');
   const [challengeEvidence, setChallengeEvidence] = useState('');
   const [escrowAction, setEscrowAction] = useState('');
+  const [lastTxHash, setLastTxHash] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
@@ -173,41 +188,62 @@ export default function EscrowPage() {
   });
 
   const proposalStatusValue = Number(readField(proposalResult.data, 'status', 3));
+  const statusValue = Number.isFinite(proposalStatusValue) ? proposalStatusValue : -1;
   const proposalStatusLabel = STATUS_LABELS[lang]?.[proposalStatusValue] || '-';
   const submitDeadline = readField(proposalResult.data, 'submitDeadline', 7);
   const challengeWindowEnd = readField(proposalResult.data, 'challengeWindowEnd', 14);
   const remaining90 = readField(proposalResult.data, 'remaining90', 9);
+  const winnerTopicLabel =
+    winnerTopicId !== undefined ? winnerTopicId.toString() : '-';
+
+  const templateText =
+    proposalIdValue !== null
+      ? `GUA-DELIVER:${proposalIdValue.toString()}:${winnerTopicLabel}:${
+          winnerTopicResult.data || '0x...'
+        }:${templateNonce || 'nonce'}`
+      : '';
+
+  const youtubeHash = youtubeUrl.trim() ? toBytes32Hash(youtubeUrl) : '';
+  const videoIdHash = videoId.trim() ? toBytes32Hash(videoId) : '';
+  const pinnedHash = pinnedComment.trim() ? toBytes32Hash(pinnedComment) : '';
 
   const canSubmitDelivery =
     isConnected &&
-    proposalStatusLabel === 'Accepted' &&
+    statusValue === 3 &&
     chainTime !== null &&
     submitDeadline !== undefined &&
     chainTime <= Number(submitDeadline);
 
   const canChallenge =
     isConnected &&
-    proposalStatusLabel === 'Submitted' &&
+    statusValue === 4 &&
     chainTime !== null &&
     challengeWindowEnd !== undefined &&
     chainTime < Number(challengeWindowEnd);
 
   const canFinalizeDelivery =
     isConnected &&
-    proposalStatusLabel === 'Submitted' &&
+    statusValue === 4 &&
     chainTime !== null &&
     challengeWindowEnd !== undefined &&
     chainTime >= Number(challengeWindowEnd);
 
   const canExpire =
     isConnected &&
-    proposalStatusLabel === 'Accepted' &&
+    statusValue === 3 &&
     chainTime !== null &&
     submitDeadline !== undefined &&
     chainTime > Number(submitDeadline);
 
   const allowanceValue = allowanceResult.data ?? 0n;
   const hasBondAllowance = allowanceValue >= BOND_AMOUNT;
+
+  const guideSteps = [
+    { label: t('escrow.guide.connect'), done: isConnected },
+    { label: t('escrow.guide.pick'), done: proposalIdValue !== null },
+    { label: t('escrow.guide.submit'), done: statusValue >= 4 },
+    { label: t('escrow.guide.settle'), done: statusValue >= 6 },
+  ];
 
   const handleSwitchChain = async () => {
     if (!targetChainId) return;
@@ -244,6 +280,7 @@ export default function EscrowPage() {
         functionName: 'approve',
         args: [escrowAddress, BOND_AMOUNT],
       });
+      setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -256,7 +293,7 @@ export default function EscrowPage() {
   };
 
   const handleSubmitDelivery = async () => {
-    if (!proposalIdValue) {
+    if (proposalIdValue === null) {
       setStatus(statusInvalidProposal());
       return;
     }
@@ -294,6 +331,7 @@ export default function EscrowPage() {
           toBytes32Hash(pinnedComment),
         ],
       });
+      setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -306,7 +344,7 @@ export default function EscrowPage() {
   };
 
   const handleChallenge = async () => {
-    if (!proposalIdValue) {
+    if (proposalIdValue === null) {
       setStatus(statusInvalidProposal());
       return;
     }
@@ -343,6 +381,7 @@ export default function EscrowPage() {
           toBytes32Hash(challengeEvidence),
         ],
       });
+      setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -355,7 +394,7 @@ export default function EscrowPage() {
   };
 
   const handleFinalizeDelivery = async () => {
-    if (!proposalIdValue) {
+    if (proposalIdValue === null) {
       setStatus(statusInvalidProposal());
       return;
     }
@@ -384,6 +423,7 @@ export default function EscrowPage() {
         functionName: 'finalizeDelivery',
         args: [proposalIdValue],
       });
+      setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -396,7 +436,7 @@ export default function EscrowPage() {
   };
 
   const handleExpire = async () => {
-    if (!proposalIdValue) {
+    if (proposalIdValue === null) {
       setStatus(statusInvalidProposal());
       return;
     }
@@ -425,6 +465,7 @@ export default function EscrowPage() {
         functionName: 'expireIfNoSubmission',
         args: [proposalIdValue],
       });
+      setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -443,6 +484,15 @@ export default function EscrowPage() {
           <p className="eyebrow">{t('escrow.eyebrow')}</p>
           <h1>{t('escrow.title')}</h1>
           <p className="lede">{t('escrow.lede')}</p>
+          <div className="hero-actions">
+            <button
+              className="mode-toggle"
+              type="button"
+              onClick={() => setShowAdvanced((current) => !current)}
+            >
+              {showAdvanced ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+            </button>
+          </div>
         </div>
         <div className="status-card">
           <div className="status-row">
@@ -466,24 +516,49 @@ export default function EscrowPage() {
       </section>
 
       <section className="panel">
+        <h2>{t('escrow.guide.title')}</h2>
+        <div className="guide">
+          {guideSteps.map((step, index) => (
+            <div
+              key={step.label}
+              className={`guide-step${step.done ? ' done' : ''}${!step.done && index === 0 ? ' active' : ''}`}
+            >
+              <span className="badge">{index + 1}</span>
+              <span>{step.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
         <h2>{t('escrow.config.title')}</h2>
         <div className="form-grid">
-          <label className="field">
-            <span>{t('escrow.config.contract')}</span>
-            <input
-              value={escrowAddress}
-              placeholder="0x..."
-              onChange={(event) => setEscrowAddress(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>{t('escrow.config.token')}</span>
-            <input
-              value={guaTokenAddress}
-              placeholder="0x..."
-              onChange={(event) => setGuaTokenAddress(event.target.value)}
-            />
-          </label>
+          {showAdvanced && (
+            <label className="field">
+              <span>{t('escrow.config.contract')}</span>
+              <input
+                value={escrowAddress}
+                placeholder="0x..."
+                onChange={(event) => setEscrowAddress(event.target.value)}
+              />
+              <ExplorerLink
+                chainId={chainId}
+                type="address"
+                value={escrowAddress}
+                label={t('status.contract.link')}
+              />
+            </label>
+          )}
+          {showAdvanced && (
+            <label className="field">
+              <span>{t('escrow.config.token')}</span>
+              <input
+                value={guaTokenAddress}
+                placeholder="0x..."
+                onChange={(event) => setGuaTokenAddress(event.target.value)}
+              />
+            </label>
+          )}
           <label className="field">
             <span>{t('escrow.config.network')}</span>
             <select
@@ -543,6 +618,41 @@ export default function EscrowPage() {
 
       <section className="panel">
         <h2>{t('escrow.delivery.title')}</h2>
+        <p className="hint">{t('escrow.delivery.hint')}</p>
+        <div className="status-grid">
+          <div className="status-row">
+            <span>{t('escrow.delivery.template.title')}</span>
+            <span className="inline-group">
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => setTemplateNonce(makeNonce())}
+              >
+                {t('escrow.delivery.template.generate')}
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => setPinnedComment(templateText)}
+                disabled={!templateText}
+              >
+                {t('escrow.delivery.template.apply')}
+              </button>
+            </span>
+          </div>
+          <div className="status-row">
+            <span>{t('escrow.delivery.template.nonce')}</span>
+            <span>{templateNonce || '-'}</span>
+          </div>
+          <div className="status-row">
+            <span>{t('escrow.delivery.template.label')}</span>
+            <span className="inline-group">
+              <code>{templateText || '-'}</code>
+              <CopyButton value={templateText} />
+            </span>
+          </div>
+        </div>
+        <p className="hint">{t('escrow.delivery.template.help')}</p>
         <div className="form-grid">
           <label className="field full">
             <span>{t('escrow.delivery.youtube')}</span>
@@ -570,6 +680,29 @@ export default function EscrowPage() {
             ></textarea>
           </label>
         </div>
+        <div className="status-grid">
+          <div className="status-row">
+            <span>{t('escrow.delivery.hash.youtube')}</span>
+            <span className="inline-group">
+              {youtubeHash || '-'}
+              <CopyButton value={youtubeHash} />
+            </span>
+          </div>
+          <div className="status-row">
+            <span>{t('escrow.delivery.hash.videoId')}</span>
+            <span className="inline-group">
+              {videoIdHash || '-'}
+              <CopyButton value={videoIdHash} />
+            </span>
+          </div>
+          <div className="status-row">
+            <span>{t('escrow.delivery.hash.pinned')}</span>
+            <span className="inline-group">
+              {pinnedHash || '-'}
+              <CopyButton value={pinnedHash} />
+            </span>
+          </div>
+        </div>
         <div className="actions">
           <button
             className="btn primary"
@@ -579,67 +712,80 @@ export default function EscrowPage() {
             {escrowAction === 'submit' ? t('escrow.delivery.submitting') : t('escrow.delivery.submit')}
           </button>
         </div>
-      </section>
-
-      <section className="panel">
-        <h2>{t('escrow.challenge.title')}</h2>
-        <p className="hint">{t('term.bond')}</p>
-        <div className="form-grid">
-          <label className="field full">
-            <span>{t('escrow.challenge.reason')}</span>
-            <input
-              value={challengeReason}
-              placeholder="Optional"
-              onChange={(event) => setChallengeReason(event.target.value)}
-            />
-          </label>
-          <label className="field full">
-            <span>{t('escrow.challenge.evidence')}</span>
-            <input
-              value={challengeEvidence}
-              placeholder="Optional"
-              onChange={(event) => setChallengeEvidence(event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="actions">
-          <button
-            className="btn ghost"
-            onClick={handleApproveBond}
-            disabled={isWriting || escrowAction === 'approve' || !isConnected}
-          >
-            {hasBondAllowance ? t('escrow.challenge.approved') : t('escrow.challenge.approveBond')}
-          </button>
-          <button
-            className="btn ghost"
-            onClick={handleChallenge}
-            disabled={isWriting || !canChallenge || !hasBondAllowance}
-          >
-            {escrowAction === 'challenge' ? t('escrow.challenge.submitting') : t('escrow.challenge.submit')}
-          </button>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h2>{t('escrow.settlement.title')}</h2>
-        <div className="actions">
-          <button
-            className="btn primary"
-            onClick={handleFinalizeDelivery}
-            disabled={isWriting || !canFinalizeDelivery}
-          >
-            {escrowAction === 'finalize' ? t('escrow.settlement.finalizing') : t('escrow.settlement.finalize')}
-          </button>
-          <button
-            className="btn ghost"
-            onClick={handleExpire}
-            disabled={isWriting || !canExpire}
-          >
-            {escrowAction === 'expire' ? t('escrow.settlement.expiring') : t('escrow.settlement.expire')}
-          </button>
-        </div>
         <StatusNotice status={status} />
+        <div className="status-row">
+          <span>{t('status.tx.latest')}</span>
+          <span className="inline-group">
+            {lastTxHash || '-'}
+            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+          </span>
+        </div>
       </section>
+
+      {showAdvanced && (
+        <section className="panel">
+          <h2>{t('escrow.challenge.title')}</h2>
+          <p className="hint">{t('term.challengeWindow.help')}</p>
+          <p className="hint">{t('term.bond')}</p>
+          <div className="form-grid">
+            <label className="field full">
+              <span>{t('escrow.challenge.reason')}</span>
+              <input
+                value={challengeReason}
+                placeholder={t('ui.optional')}
+                onChange={(event) => setChallengeReason(event.target.value)}
+              />
+            </label>
+            <label className="field full">
+              <span>{t('escrow.challenge.evidence')}</span>
+              <input
+                value={challengeEvidence}
+                placeholder={t('ui.optional')}
+                onChange={(event) => setChallengeEvidence(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="actions">
+            <button
+              className="btn ghost"
+              onClick={handleApproveBond}
+              disabled={isWriting || escrowAction === 'approve' || !isConnected}
+            >
+              {hasBondAllowance ? t('escrow.challenge.approved') : t('escrow.challenge.approveBond')}
+            </button>
+            <button
+              className="btn ghost"
+              onClick={handleChallenge}
+              disabled={isWriting || !canChallenge || !hasBondAllowance}
+            >
+              {escrowAction === 'challenge' ? t('escrow.challenge.submitting') : t('escrow.challenge.submit')}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {showAdvanced && (
+        <section className="panel">
+          <h2>{t('escrow.settlement.title')}</h2>
+          <p className="hint">{t('term.submitDeadline.help')}</p>
+          <div className="actions">
+            <button
+              className="btn primary"
+              onClick={handleFinalizeDelivery}
+              disabled={isWriting || !canFinalizeDelivery}
+            >
+              {escrowAction === 'finalize' ? t('escrow.settlement.finalizing') : t('escrow.settlement.finalize')}
+            </button>
+            <button
+              className="btn ghost"
+              onClick={handleExpire}
+              disabled={isWriting || !canExpire}
+            >
+              {escrowAction === 'expire' ? t('escrow.settlement.expiring') : t('escrow.settlement.expire')}
+            </button>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

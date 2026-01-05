@@ -1,4 +1,4 @@
-# GUA Token System (Base) — Airdrop → Vote → Escrow Payout → Incentives
+﻿# GUA Token System (Base) — Airdrop → Vote → Escrow Payout → Incentives
 
 这是「吃瓜群众自治社」旗下 **GUA 币（GUA Token）** 的主仓库。  
 目标不是“发一个币”，而是把它做成一条 **可运行、可验证、可持续** 的闭环系统：
@@ -193,6 +193,12 @@ forge script script/Deploy.s.sol:Deploy --rpc-url base_sepolia --broadcast --ver
 - 合约将使用：transferFrom(TREASURY, challenger, 5000 GUA)
 
 详见：docs/treasury-ops.md
+
+## 运维快速指引（Nouns 风格）
+
+- 交易追踪：用 BaseScan 查看交易哈希与合约地址（dApp 页面提供直达链接）
+- 紧急暂停：Admin 可在前端执行 Pause/Unpause，用于快速止损与排查
+- 激励发布：生成新一期 root → 更新合约 root → 公布 proofs.json
 
 ## MVP Demo（我们要跑通的最小闭环）
 

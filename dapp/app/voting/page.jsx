@@ -26,6 +26,7 @@ import {
 } from '../../lib/status';
 import { useI18n } from '../components/LanguageProvider';
 import CopyButton from '../components/CopyButton';
+import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
 
 const ESCROW_ABI = parseAbi([
@@ -40,9 +41,12 @@ const ERC20_ABI = parseAbi([
 ]);
 
 const STATUS_LABELS = {
-  zh: ['已创建', '投票中', '投票已结束', '已确认', '已提交', '质疑中', '已完成', '已否决', '已过期'],
+  zh: ['已创建', '投票中', '投票结束', '已确认', '已提交', '质疑中', '已完成', '已拒绝', '已过期'],
   en: ['Created', 'Voting', 'Voting ended', 'Accepted', 'Submitted', 'Disputed', 'Completed', 'Denied', 'Expired'],
 };
+
+const shortAddress = (address) =>
+  address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
 
 const formatDateTime = (timestamp) => {
   if (!timestamp) return '-';
@@ -70,6 +74,8 @@ export default function VotingPage() {
   const [status, setStatus] = useState(statusReady());
   const [chainTime, setChainTime] = useState(null);
   const [action, setAction] = useState('');
+  const [lastTxHash, setLastTxHash] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
@@ -184,9 +190,15 @@ export default function VotingPage() {
     startTime !== undefined &&
     endTime !== undefined &&
     chainTime >= Number(startTime) &&
-    chainTime <= Number(endTime);
+    chainTime < Number(endTime);
 
   const allowanceValue = allowanceResult.data ?? 0n;
+  const steps = [
+    { label: t('voting.guide.connect'), done: isConnected },
+    { label: t('voting.guide.pick'), done: Boolean(selectedTopic) },
+    { label: t('voting.guide.approve'), done: allowanceValue > 0n },
+    { label: t('voting.guide.submit'), done: status.kind === 'success' },
+  ];
 
   const handleSwitchChain = async () => {
     if (!targetChainId) return;
@@ -236,6 +248,7 @@ export default function VotingPage() {
         functionName: 'approve',
         args: [escrowAddress, amount],
       });
+      setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -298,6 +311,7 @@ export default function VotingPage() {
         functionName: 'stakeVote',
         args: [proposalIdValue, BigInt(selectedTopic), amount],
       });
+      setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -316,6 +330,15 @@ export default function VotingPage() {
           <p className="eyebrow">{t('voting.eyebrow')}</p>
           <h1>{t('voting.title')}</h1>
           <p className="lede">{t('voting.lede')}</p>
+          <div className="hero-actions">
+            <button
+              className="mode-toggle"
+              type="button"
+              onClick={() => setShowAdvanced((current) => !current)}
+            >
+              {showAdvanced ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+            </button>
+          </div>
         </div>
         <div className="status-card">
           <div className="status-row">
@@ -339,24 +362,49 @@ export default function VotingPage() {
       </section>
 
       <section className="panel">
+        <h2>{t('voting.guide.title')}</h2>
+        <div className="guide">
+          {steps.map((step, index) => (
+            <div
+              key={step.label}
+              className={`guide-step${step.done ? ' done' : ''}${!step.done && index === 0 ? ' active' : ''}`}
+            >
+              <span className="badge">{index + 1}</span>
+              <span>{step.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
         <h2>{t('voting.config.title')}</h2>
         <div className="form-grid">
-          <label className="field">
-            <span>{t('voting.config.contract')}</span>
-            <input
-              value={escrowAddress}
-              placeholder="0x..."
-              onChange={(event) => setEscrowAddress(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>{t('voting.config.token')}</span>
-            <input
-              value={guaTokenAddress}
-              placeholder="0x..."
-              onChange={(event) => setGuaTokenAddress(event.target.value)}
-            />
-          </label>
+          {showAdvanced && (
+            <label className="field">
+              <span>{t('voting.config.contract')}</span>
+              <input
+                value={escrowAddress}
+                placeholder="0x..."
+                onChange={(event) => setEscrowAddress(event.target.value)}
+              />
+              <ExplorerLink
+                chainId={chainId}
+                type="address"
+                value={escrowAddress}
+                label={t('status.contract.link')}
+              />
+            </label>
+          )}
+          {showAdvanced && (
+            <label className="field">
+              <span>{t('voting.config.token')}</span>
+              <input
+                value={guaTokenAddress}
+                placeholder="0x..."
+                onChange={(event) => setGuaTokenAddress(event.target.value)}
+              />
+            </label>
+          )}
           <label className="field">
             <span>{t('voting.config.network')}</span>
             <select
@@ -440,6 +488,7 @@ export default function VotingPage() {
             />
           </label>
         </div>
+        {!showAdvanced && <p className="hint">{t('voting.submit.hint')}</p>}
         <div className="actions">
           <button
             className="btn ghost"
@@ -457,6 +506,13 @@ export default function VotingPage() {
           </button>
         </div>
         <StatusNotice status={status} />
+        <div className="status-row">
+          <span>{t('status.tx.latest')}</span>
+          <span className="inline-group">
+            {lastTxHash || '-'}
+            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+          </span>
+        </div>
       </section>
     </main>
   );

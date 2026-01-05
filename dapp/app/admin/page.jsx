@@ -24,6 +24,7 @@ import {
   statusTxConfirmed,
 } from '../../lib/status';
 import { useI18n } from '../components/LanguageProvider';
+import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
 
 const ESCROW_ABI = parseAbi([
@@ -32,10 +33,13 @@ const ESCROW_ABI = parseAbi([
   'function finalizeVoting(uint256 proposalId)',
   'function confirmWinnerAndPay10(uint256 proposalId)',
   'function resolveDispute(uint256 proposalId,bool approve)',
+  'function pause()',
+  'function unpause()',
+  'function paused() view returns (bool)',
 ]);
 
 const STATUS_LABELS = {
-  zh: ['已创建', '投票中', '投票已结束', '已确认', '已提交', '质疑中', '已完成', '已否决', '已过期'],
+  zh: ['已创建', '投票中', '投票结束', '已确认', '已提交', '质疑中', '已完成', '已拒绝', '已过期'],
   en: ['Created', 'Voting', 'Voting ended', 'Accepted', 'Submitted', 'Disputed', 'Completed', 'Denied', 'Expired'],
 };
 
@@ -64,6 +68,7 @@ export default function AdminPage() {
   const [ownerInputs, setOwnerInputs] = useState(['', '', '']);
   const [voteStart, setVoteStart] = useState('');
   const [voteEnd, setVoteEnd] = useState('');
+  const [lastTxHash, setLastTxHash] = useState('');
 
   const { isConnected } = useAccount();
   const chainId = useChainId();
@@ -120,6 +125,15 @@ export default function AdminPage() {
     },
   });
 
+  const pausedResult = useReadContract({
+    address: isAddress(escrowAddress) ? escrowAddress : undefined,
+    abi: ESCROW_ABI,
+    functionName: 'paused',
+    query: {
+      enabled: isAddress(escrowAddress),
+    },
+  });
+
   const proposalStatusValue = Number(readField(proposalResult.data, 'status', 3));
   const proposalStatusLabel = STATUS_LABELS[lang]?.[proposalStatusValue] || '-';
   const endTime = readField(proposalResult.data, 'endTime', 1);
@@ -169,6 +183,7 @@ export default function AdminPage() {
       setAction(name);
       setStatus(statusTxSubmitted());
       const hash = await fn();
+      if (hash) setLastTxHash(hash);
       setStatus(statusTxConfirming());
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus(statusTxConfirmed());
@@ -208,6 +223,32 @@ export default function AdminPage() {
         functionName: 'resolveDispute',
         args: [proposalIdValue, approve],
       })
+    );
+
+  const handlePause = () =>
+    runAction(
+      'pause',
+      () =>
+        writeContractAsync({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'pause',
+          args: [],
+        }),
+      { requireProposal: false }
+    );
+
+  const handleUnpause = () =>
+    runAction(
+      'unpause',
+      () =>
+        writeContractAsync({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'unpause',
+          args: [],
+        }),
+      { requireProposal: false }
     );
 
   const updateOwner = (index, value) => {
@@ -293,6 +334,12 @@ export default function AdminPage() {
               placeholder="0x..."
               onChange={(event) => setEscrowAddress(event.target.value)}
             />
+            <ExplorerLink
+              chainId={chainId}
+              type="address"
+              value={escrowAddress}
+              label={t('status.contract.link')}
+            />
           </label>
           <label className="field">
             <span>{t('voting.config.network')}</span>
@@ -363,6 +410,37 @@ export default function AdminPage() {
           </button>
         </div>
         <StatusNotice status={status} />
+        <div className="status-row">
+          <span>{t('status.tx.latest')}</span>
+          <span className="inline-group">
+            {lastTxHash || '-'}
+            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+          </span>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>{t('admin.pause.title')}</h2>
+        <div className="status-row">
+          <span>{t('admin.statusLabel')}</span>
+          <span>{pausedResult.data ? t('admin.pause.paused') : t('admin.pause.unpaused')}</span>
+        </div>
+        <div className="actions">
+          <button
+            className="btn ghost"
+            onClick={handlePause}
+            disabled={isWriting || action === 'pause' || pausedResult.data === true}
+          >
+            {t('admin.pause.action')}
+          </button>
+          <button
+            className="btn ghost"
+            onClick={handleUnpause}
+            disabled={isWriting || action === 'unpause' || pausedResult.data === false}
+          >
+            {t('admin.pause.release')}
+          </button>
+        </div>
       </section>
 
       <section className="panel">

@@ -44,6 +44,15 @@ contract TopicBountyEscrowTest is Test {
         assertEq(proposal.winnerTopicId, 0);
         assertEq(proposal.totalPool, 0);
         assertFalse(proposal.finalized);
+        assertEq(proposal.submitDeadline, 0);
+        assertEq(proposal.paid10, 0);
+        assertEq(proposal.remaining90, 0);
+        assertFalse(proposal.confirmed);
+        assertEq(proposal.youtubeUrlHash, bytes32(0));
+        assertEq(proposal.videoIdHash, bytes32(0));
+        assertEq(proposal.pinnedCodeHash, bytes32(0));
+        assertEq(proposal.challengeWindowEnd, 0);
+        assertFalse(proposal.deliverySubmitted);
 
         TopicBountyEscrow.Topic memory topic0 = escrow.getTopic(proposalId, 0);
         TopicBountyEscrow.Topic memory topic1 = escrow.getTopic(proposalId, 1);
@@ -215,5 +224,185 @@ contract TopicBountyEscrowTest is Test {
 
         vm.expectRevert("TopicBountyEscrow: already finalized");
         escrow.finalizeVoting(proposalId);
+    }
+
+    function test_ConfirmWinnerPays10() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        token.mint(user1, 50 ether);
+        vm.startPrank(user1);
+        token.approve(address(escrow), 50 ether);
+        escrow.stakeVote(proposalId, 0, 50 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.finalizeVoting(proposalId);
+
+        uint256 balanceBefore = token.balanceOf(user1);
+        escrow.confirmWinnerAndPay10(proposalId);
+
+        TopicBountyEscrow.Proposal memory proposal = escrow.getProposal(proposalId);
+        assertTrue(proposal.confirmed);
+        assertEq(proposal.paid10, 5 ether);
+        assertEq(proposal.remaining90, 45 ether);
+        assertEq(proposal.submitDeadline, block.timestamp + 14 days);
+        assertEq(token.balanceOf(user1), balanceBefore + 5 ether);
+    }
+
+    function test_ConfirmWinnerRequiresFinalized() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        vm.expectRevert("TopicBountyEscrow: voting not finalized");
+        escrow.confirmWinnerAndPay10(proposalId);
+    }
+
+    function test_ConfirmWinnerCannotRepeat() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        token.mint(user2, 20 ether);
+        vm.startPrank(user2);
+        token.approve(address(escrow), 20 ether);
+        escrow.stakeVote(proposalId, 1, 20 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.finalizeVoting(proposalId);
+        escrow.confirmWinnerAndPay10(proposalId);
+
+        vm.expectRevert("TopicBountyEscrow: already confirmed");
+        escrow.confirmWinnerAndPay10(proposalId);
+    }
+
+    function test_NonOwnerCannotConfirmWinner() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        token.mint(user3, 30 ether);
+        vm.startPrank(user3);
+        token.approve(address(escrow), 30 ether);
+        escrow.stakeVote(proposalId, 2, 30 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.finalizeVoting(proposalId);
+
+        vm.prank(user1);
+        vm.expectRevert();
+        escrow.confirmWinnerAndPay10(proposalId);
+    }
+
+    function test_SubmitDeliverySuccess() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        token.mint(user1, 10 ether);
+        vm.startPrank(user1);
+        token.approve(address(escrow), 10 ether);
+        escrow.stakeVote(proposalId, 0, 10 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.finalizeVoting(proposalId);
+        escrow.confirmWinnerAndPay10(proposalId);
+
+        bytes32 urlHash = keccak256("youtube-url");
+        bytes32 videoHash = keccak256("video-id");
+        bytes32 pinnedHash = keccak256("pinned-code");
+
+        vm.prank(user1);
+        escrow.submitDelivery(proposalId, urlHash, videoHash, pinnedHash);
+
+        TopicBountyEscrow.Proposal memory proposal = escrow.getProposal(proposalId);
+        assertTrue(proposal.deliverySubmitted);
+        assertEq(proposal.youtubeUrlHash, urlHash);
+        assertEq(proposal.videoIdHash, videoHash);
+        assertEq(proposal.pinnedCodeHash, pinnedHash);
+        assertEq(proposal.challengeWindowEnd, block.timestamp + 72 hours);
+    }
+
+    function test_SubmitDeliveryRejectsNonWinner() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        token.mint(user2, 10 ether);
+        vm.startPrank(user2);
+        token.approve(address(escrow), 10 ether);
+        escrow.stakeVote(proposalId, 1, 10 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.finalizeVoting(proposalId);
+        escrow.confirmWinnerAndPay10(proposalId);
+
+        vm.prank(user1);
+        vm.expectRevert("TopicBountyEscrow: not winner");
+        escrow.submitDelivery(proposalId, keccak256("url"), keccak256("vid"), keccak256("pin"));
+    }
+
+    function test_SubmitDeliveryRejectsRepeated() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+
+        token.mint(user3, 10 ether);
+        vm.startPrank(user3);
+        token.approve(address(escrow), 10 ether);
+        escrow.stakeVote(proposalId, 2, 10 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        escrow.finalizeVoting(proposalId);
+        escrow.confirmWinnerAndPay10(proposalId);
+
+        vm.prank(user3);
+        escrow.submitDelivery(proposalId, keccak256("url"), keccak256("vid"), keccak256("pin"));
+
+        vm.prank(user3);
+        vm.expectRevert("TopicBountyEscrow: already submitted");
+        escrow.submitDelivery(proposalId, keccak256("url2"), keccak256("vid2"), keccak256("pin2"));
     }
 }

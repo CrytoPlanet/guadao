@@ -17,6 +17,15 @@ contract TopicBountyEscrow is Ownable {
         uint256 winnerTopicId;
         uint256 totalPool;
         bool finalized;
+        uint256 submitDeadline;
+        uint256 paid10;
+        uint256 remaining90;
+        bool confirmed;
+        bytes32 youtubeUrlHash;
+        bytes32 videoIdHash;
+        bytes32 pinnedCodeHash;
+        uint256 challengeWindowEnd;
+        bool deliverySubmitted;
     }
 
     struct Topic {
@@ -40,6 +49,21 @@ contract TopicBountyEscrow is Ownable {
     );
     event Voted(address indexed voter, uint256 indexed proposalId, uint256 indexed topicId, uint256 amount);
     event VotingFinalized(uint256 indexed proposalId, uint256 winnerTopicId, uint256 totalPool);
+    event WinnerConfirmed(
+        uint256 indexed proposalId,
+        uint256 indexed winnerTopicId,
+        address indexed winnerOwner,
+        uint256 payout10,
+        uint256 submitDeadline
+    );
+    event DeliverySubmitted(
+        uint256 indexed proposalId,
+        address indexed submitter,
+        bytes32 youtubeUrlHash,
+        bytes32 videoIdHash,
+        bytes32 pinnedCodeHash,
+        uint256 challengeWindowEnd
+    );
 
     constructor(address _guaToken, address _owner) Ownable(_owner) {
         require(_guaToken != address(0), "TopicBountyEscrow: invalid token");
@@ -65,7 +89,16 @@ contract TopicBountyEscrow is Ownable {
             status: ProposalStatus.Created,
             winnerTopicId: 0,
             totalPool: 0,
-            finalized: false
+            finalized: false,
+            submitDeadline: 0,
+            paid10: 0,
+            remaining90: 0,
+            confirmed: false,
+            youtubeUrlHash: bytes32(0),
+            videoIdHash: bytes32(0),
+            pinnedCodeHash: bytes32(0),
+            challengeWindowEnd: 0,
+            deliverySubmitted: false
         });
 
         uint256[] memory topicIds = new uint256[](count);
@@ -104,6 +137,65 @@ contract TopicBountyEscrow is Ownable {
         proposal.finalized = true;
 
         emit VotingFinalized(proposalId, winningTopicId, pool);
+    }
+
+    function confirmWinnerAndPay10(uint256 proposalId) external onlyOwner {
+        Proposal storage proposal = proposals[proposalId];
+        require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
+        require(proposal.finalized, "TopicBountyEscrow: voting not finalized");
+        require(!proposal.confirmed, "TopicBountyEscrow: already confirmed");
+
+        Topic memory winningTopic = topics[proposalId][proposal.winnerTopicId];
+        require(winningTopic.owner != address(0), "TopicBountyEscrow: invalid winner");
+
+        uint256 payout10 = proposal.totalPool / 10;
+        uint256 remaining90 = proposal.totalPool - payout10;
+
+        proposal.paid10 = payout10;
+        proposal.remaining90 = remaining90;
+        proposal.submitDeadline = block.timestamp + 14 days;
+        proposal.confirmed = true;
+
+        guaToken.transfer(winningTopic.owner, payout10);
+
+        emit WinnerConfirmed(
+            proposalId,
+            proposal.winnerTopicId,
+            winningTopic.owner,
+            payout10,
+            proposal.submitDeadline
+        );
+    }
+
+    function submitDelivery(
+        uint256 proposalId,
+        bytes32 youtubeUrlHash,
+        bytes32 videoIdHash,
+        bytes32 pinnedCodeHash
+    ) external {
+        Proposal storage proposal = proposals[proposalId];
+        require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
+        require(proposal.confirmed, "TopicBountyEscrow: winner not confirmed");
+        require(!proposal.deliverySubmitted, "TopicBountyEscrow: already submitted");
+        require(block.timestamp <= proposal.submitDeadline, "TopicBountyEscrow: submission expired");
+
+        Topic memory winningTopic = topics[proposalId][proposal.winnerTopicId];
+        require(msg.sender == winningTopic.owner, "TopicBountyEscrow: not winner");
+
+        proposal.youtubeUrlHash = youtubeUrlHash;
+        proposal.videoIdHash = videoIdHash;
+        proposal.pinnedCodeHash = pinnedCodeHash;
+        proposal.challengeWindowEnd = block.timestamp + 72 hours;
+        proposal.deliverySubmitted = true;
+
+        emit DeliverySubmitted(
+            proposalId,
+            msg.sender,
+            youtubeUrlHash,
+            videoIdHash,
+            pinnedCodeHash,
+            proposal.challengeWindowEnd
+        );
     }
 
     function stakeVote(uint256 proposalId, uint256 topicId, uint256 amount) external {

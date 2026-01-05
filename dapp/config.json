@@ -1,20 +1,26 @@
 {
-    "defaultChainId":  31337,
-    "chains":  {
-                   "8453":  {
-                                "label":  "Base Mainnet",
-                                "airdropAddress":  "",
-                                "proofsUrl":  "/merkle/proofs.json"
-                            },
-                   "84532":  {
-                                 "label":  "Base Sepolia",
-                                 "airdropAddress":  "",
-                                 "proofsUrl":  "/merkle/proofs.json"
-                             },
-                   "31337":  {
-                                 "label":  "Local Anvil",
-                                 "airdropAddress":  "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-                                 "proofsUrl":  "/merkle/proofs.json"
-                             }
-               }
+  "defaultChainId": 31337,
+  "walletConnect": {
+    "projectId": ""
+  },
+  "chains": {
+    "8453": {
+      "label": "Base Mainnet",
+      "airdropAddress": "",
+      "proofsUrl": "/merkle/proofs.json",
+      "rpcUrl": "https://mainnet.base.org"
+    },
+    "84532": {
+      "label": "Base Sepolia",
+      "airdropAddress": "",
+      "proofsUrl": "/merkle/proofs.json",
+      "rpcUrl": "https://sepolia.base.org"
+    },
+    "31337": {
+      "label": "Local Anvil",
+      "airdropAddress": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "proofsUrl": "/merkle/proofs.json",
+      "rpcUrl": "http://localhost:8545"
+    }
+  }
 }

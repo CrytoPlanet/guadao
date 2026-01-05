@@ -1,0 +1,20 @@
+{
+  "name": "gua-dapp",
+  "private": true,
+  "version": "0.2.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.51.1",
+    "connectkit": "^1.8.1",
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "viem": "^2.20.0",
+    "wagmi": "^2.12.6"
+  }
+}

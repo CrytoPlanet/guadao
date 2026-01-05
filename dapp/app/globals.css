@@ -316,6 +316,11 @@ textarea {
   background: rgba(255, 91, 46, 0.12);
   border: 1px solid rgba(255, 91, 46, 0.25);
   font-family: var(--font-title);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .muted {

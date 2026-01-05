@@ -20,3 +20,9 @@ Acceptance Criteria
 
 ✅ Foundry tests 覆盖：success / double-claim / wrong-proof / wrong-amount
 Labels：contract airdrop core
+Status
+
+- Completed
+- Epoch-based re-claim support added in contracts/MerkleAirdrop.sol
+- Tests updated in test/MerkleAirdrop.t.sol
+- forge test: 25 passed

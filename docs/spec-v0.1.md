@@ -1,4 +1,4 @@
-# GUA Token System — 规范 v0.1（冻结版）
+﻿# GUA Token System — 规范 v0.1（冻结版）
 
 > **状态：** 冻结（v0.1）  
 > **网络：** Base  

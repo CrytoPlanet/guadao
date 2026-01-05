@@ -1,4 +1,4 @@
-# GUA Token System (Base) — Airdrop → Vote → Escrow Payout → Incentives
+﻿# GUA Token System (Base) — Airdrop → Vote → Escrow Payout → Incentives
 
 这是「吃瓜群众自治社」旗下 **GUA 币（GUA Token）** 的主仓库。  
 目标不是“发一个币”，而是把它做成一条 **可运行、可验证、可持续** 的闭环系统：
@@ -113,21 +113,17 @@
 .
 ├── contracts/
 │   └── GUAToken.sol                 # ✅ GUA Token 合约（ERC-20）
-│   ├── TopicBountyEscrow.sol        # 投票 + 托管 + 10%/90% + 质疑/仲裁（待实现）
-│   ├── MerkleAirdrop.sol            # 空投/贡献领取（Merkle Claim）（待实现）
+│   ├── TopicBountyEscrow.sol        # 投票 + 托管 + 10%/90% + 质疑/仲裁
+│   ├── MerkleAirdrop.sol            # 空投/贡献领取（Merkle Claim）
 │   └── Treasury.sol (optional)      # v0.1 可只用地址，不一定要合约
 ├── script/
 │   └── Deploy.s.sol                 # ✅ 部署脚本（Foundry）
 │   ├── GenerateMerkleRoot.js        # 生成 Merkle root（Node）
 │   └── SnapshotExample.csv          # 示例领取名单
 ├── test/
-│   └── GUAToken.t.sol               # ✅ GUA Token 测试
-│   ├── Airdrop.t.sol                # （待实现）
-│   ├── Voting.t.sol                 # （待实现）
-│   ├── Delivery.t.sol               # （待实现）
-│   ├── Dispute.t.sol                # （待实现）
-│   └── Expiry.t.sol                 # （待实现）
-├── docs/
+│   ├── GUAToken.t.sol               # ✅ GUA Token 测试
+│   ├── MerkleAirdrop.t.sol          # ✅ MerkleAirdrop 测试
+│   └── TopicBountyEscrow.t.sol      # ✅ TopicBountyEscrow 测试├── docs/
 │   ├── spec-v0.1.md                 # 系统规范
 │   ├── pinned-comment-proof.md      # 交付证明说明
 │   └── treasury-ops.md              # Treasury 操作说明
@@ -143,7 +139,6 @@
 
 **状态说明**：
 - ✅ 已完成
-- （待实现） 计划中
 
 ## Quick Start（Foundry）
 
@@ -198,6 +193,12 @@ forge script script/Deploy.s.sol:Deploy --rpc-url base_sepolia --broadcast --ver
 - 合约将使用：transferFrom(TREASURY, challenger, 5000 GUA)
 
 详见：docs/treasury-ops.md
+
+## 运维快速指引（Nouns 风格）
+
+- 交易追踪：用 BaseScan 查看交易哈希与合约地址（dApp 页面提供直达链接）
+- 紧急暂停：Admin 可在前端执行 Pause/Unpause，用于快速止损与排查
+- 激励发布：生成新一期 root → 更新合约 root → 公布 proofs.json
 
 ## MVP Demo（我们要跑通的最小闭环）
 

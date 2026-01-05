@@ -26,3 +26,8 @@ Thumbs.db
 coverage/
 coverage.json
 
+# Node / Next.js
+node_modules/
+dapp/node_modules/
+.next/
+

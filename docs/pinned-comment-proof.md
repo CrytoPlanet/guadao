@@ -1,4 +1,4 @@
-# pinned-comment-proof.md（置顶评论交付证明）— v0.1
+﻿# pinned-comment-proof.md（置顶评论交付证明）— v0.1
 
 > **用途：** 本文档说明在 GUA v0.1 体系里，Topic Owner（创作者）如何通过 **YouTube 置顶评论** 来完成“交付证明（Delivery Proof）”。  
 > **核心目标：** 让社区用一个**公开、可验证、低门槛**的方法，绑定 “视频交付 ↔ 创作者钱包”，并开启 **72 小时质疑窗口**。

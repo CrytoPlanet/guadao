@@ -1,6 +1,6 @@
-# 本地空投测试指南
+﻿# 本地空投测试指南
 
-本指南说明如何使用 Anvil + 静态 dApp 在本地完成空投领取测试。
+本指南说明如何使用 Anvil + Next.js dApp 在本地完成空投领取测试。
 
 ## 准备工作
 
@@ -43,23 +43,25 @@ cast send <AIR_DROP_ADDR> "setMerkleRoot(bytes32)" $root --rpc-url http://127.0.
 ## 4) 准备 dApp 资源
 
 ```bash
-mkdir dapp\merkle
-copy merkle\proofs.json dapp\merkle\proofs.json
+mkdir dapp\public\merkle
+copy merkle\proofs.json dapp\public\merkle\proofs.json
 ```
 
 更新 `dapp/config.json`：
 
 - `defaultChainId` 设为 `31337`
 - `chains.31337.airdropAddress` 设为 `<AIR_DROP_ADDR>`
+- `chains.31337.proofsUrl` 设为 `http://localhost:3000/merkle/proofs.json`
 
 ## 5) 启动 dApp
 
 ```bash
 cd dapp
-python -m http.server 4173
+npm install
+npm run dev
 ```
 
-浏览器打开 `http://localhost:4173`。
+浏览器打开 `http://localhost:3000`。
 
 ## 6) MetaMask 配置
 

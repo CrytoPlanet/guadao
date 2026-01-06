@@ -725,10 +725,7 @@ contract TopicBountyEscrowTest is Test {
 
         escrow.resolveDispute(proposalId, false);
 
-        assertEq(
-            token.balanceOf(treasury),
-            treasuryBalanceBefore + proposal.remaining90 - 5_000 ether
-        );
+        assertEq(token.balanceOf(treasury), treasuryBalanceBefore + proposal.remaining90 - 5_000 ether);
         assertEq(token.balanceOf(user2), challengerBalanceBefore + 10_000 ether + 5_000 ether);
         assertTrue(escrow.getProposal(proposalId).disputeResolved);
     }
@@ -751,8 +748,7 @@ contract TopicBountyEscrowTest is Test {
     function test_ResolveDisputeBlocksReentrancy() public {
         ReentrantToken reentrantToken = new ReentrantToken();
         address escrowOwner = address(reentrantToken);
-        TopicBountyEscrow reentrantEscrow =
-            new TopicBountyEscrow(address(reentrantToken), escrowOwner, treasury);
+        TopicBountyEscrow reentrantEscrow = new TopicBountyEscrow(address(reentrantToken), escrowOwner, treasury);
 
         address[] memory owners = new address[](3);
         owners[0] = user1;
@@ -785,8 +781,7 @@ contract TopicBountyEscrowTest is Test {
         reentrantEscrow.challengeDelivery(proposalId, keccak256("reason"), keccak256("evidence"));
         vm.stopPrank();
 
-        bytes memory reenterData =
-            abi.encodeWithSelector(TopicBountyEscrow.resolveDispute.selector, proposalId, true);
+        bytes memory reenterData = abi.encodeWithSelector(TopicBountyEscrow.resolveDispute.selector, proposalId, true);
         reentrantToken.setReenter(address(reentrantEscrow), reenterData);
 
         vm.prank(escrowOwner);

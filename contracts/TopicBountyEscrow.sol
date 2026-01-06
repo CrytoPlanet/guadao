@@ -56,11 +56,7 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
     mapping(uint256 => mapping(uint256 => mapping(address => uint256))) public voterStakeByTopic;
 
     event ProposalCreated(
-        uint256 indexed proposalId,
-        uint64 startTime,
-        uint64 endTime,
-        uint256[] topicIds,
-        address[] topicOwners
+        uint256 indexed proposalId, uint64 startTime, uint64 endTime, uint256[] topicIds, address[] topicOwners
     );
     event Voted(address indexed voter, uint256 indexed proposalId, uint256 indexed topicId, uint256 amount);
     event VotingFinalized(uint256 indexed proposalId, uint256 winnerTopicId, uint256 totalPool);
@@ -80,10 +76,7 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         uint256 challengeWindowEnd
     );
     event DeliveryChallenged(
-        uint256 indexed proposalId,
-        address indexed challenger,
-        bytes32 reasonHash,
-        bytes32 evidenceHash
+        uint256 indexed proposalId, address indexed challenger, bytes32 reasonHash, bytes32 evidenceHash
     );
     event DisputeResolved(uint256 indexed proposalId, address indexed resolver, bool approved);
     event Expired(uint256 indexed proposalId, uint256 amount);
@@ -99,11 +92,12 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         treasury = _treasury;
     }
 
-    function createProposal(
-        address[] calldata topicOwners,
-        uint64 startTime,
-        uint64 endTime
-    ) external onlyOwner whenNotPaused returns (uint256 proposalId) {
+    function createProposal(address[] calldata topicOwners, uint64 startTime, uint64 endTime)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 proposalId)
+    {
         uint256 count = topicOwners.length;
         require(count >= 3 && count <= 5, "TopicBountyEscrow: invalid topic count");
         require(endTime > startTime, "TopicBountyEscrow: invalid window");
@@ -172,9 +166,7 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         emit VotingFinalized(proposalId, winningTopicId, pool);
     }
 
-    function confirmWinnerAndPay10(
-        uint256 proposalId
-    ) external onlyOwner whenNotPaused nonReentrant {
+    function confirmWinnerAndPay10(uint256 proposalId) external onlyOwner whenNotPaused nonReentrant {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.VotingFinalized, "TopicBountyEscrow: voting not finalized");
@@ -195,21 +187,13 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
 
         guaToken.transfer(winningTopic.owner, payout10);
 
-        emit WinnerConfirmed(
-            proposalId,
-            proposal.winnerTopicId,
-            winningTopic.owner,
-            payout10,
-            proposal.submitDeadline
-        );
+        emit WinnerConfirmed(proposalId, proposal.winnerTopicId, winningTopic.owner, payout10, proposal.submitDeadline);
     }
 
-    function submitDelivery(
-        uint256 proposalId,
-        bytes32 youtubeUrlHash,
-        bytes32 videoIdHash,
-        bytes32 pinnedCodeHash
-    ) external whenNotPaused {
+    function submitDelivery(uint256 proposalId, bytes32 youtubeUrlHash, bytes32 videoIdHash, bytes32 pinnedCodeHash)
+        external
+        whenNotPaused
+    {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Accepted, "TopicBountyEscrow: not accepted");
@@ -228,28 +212,20 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         proposal.status = ProposalStatus.Submitted;
 
         emit DeliverySubmitted(
-            proposalId,
-            msg.sender,
-            youtubeUrlHash,
-            videoIdHash,
-            pinnedCodeHash,
-            proposal.challengeWindowEnd
+            proposalId, msg.sender, youtubeUrlHash, videoIdHash, pinnedCodeHash, proposal.challengeWindowEnd
         );
     }
 
-    function challengeDelivery(
-        uint256 proposalId,
-        bytes32 reasonHash,
-        bytes32 evidenceHash
-    ) external whenNotPaused nonReentrant {
+    function challengeDelivery(uint256 proposalId, bytes32 reasonHash, bytes32 evidenceHash)
+        external
+        whenNotPaused
+        nonReentrant
+    {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status != ProposalStatus.Disputed, "TopicBountyEscrow: already disputed");
         require(proposal.status == ProposalStatus.Submitted, "TopicBountyEscrow: not submitted");
-        require(
-            block.timestamp < proposal.challengeWindowEnd,
-            "TopicBountyEscrow: challenge window closed"
-        );
+        require(block.timestamp < proposal.challengeWindowEnd, "TopicBountyEscrow: challenge window closed");
 
         uint256 bond = 10_000 ether;
         guaToken.transferFrom(msg.sender, address(this), bond);
@@ -266,10 +242,7 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Submitted, "TopicBountyEscrow: not submitted");
-        require(
-            block.timestamp >= proposal.challengeWindowEnd,
-            "TopicBountyEscrow: challenge window open"
-        );
+        require(block.timestamp >= proposal.challengeWindowEnd, "TopicBountyEscrow: challenge window open");
 
         Topic memory winningTopic = topics[proposalId][proposal.winnerTopicId];
         require(winningTopic.owner != address(0), "TopicBountyEscrow: invalid winner");
@@ -295,10 +268,7 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         emit Expired(proposalId, remaining90);
     }
 
-    function resolveDispute(
-        uint256 proposalId,
-        bool approve
-    ) external onlyOwner whenNotPaused nonReentrant {
+    function resolveDispute(uint256 proposalId, bool approve) external onlyOwner whenNotPaused nonReentrant {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
         require(proposal.status == ProposalStatus.Disputed, "TopicBountyEscrow: not disputed");
@@ -333,11 +303,7 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         emit DisputeResolved(proposalId, msg.sender, approve);
     }
 
-    function stakeVote(
-        uint256 proposalId,
-        uint256 topicId,
-        uint256 amount
-    ) external whenNotPaused nonReentrant {
+    function stakeVote(uint256 proposalId, uint256 topicId, uint256 amount) external whenNotPaused nonReentrant {
         require(amount > 0, "TopicBountyEscrow: invalid amount");
         Proposal memory proposal = proposals[proposalId];
         require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");

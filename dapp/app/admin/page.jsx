@@ -26,6 +26,7 @@ import {
 import { useI18n } from '../components/LanguageProvider';
 import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
+import DateTimePicker from '../../components/DateTimePicker';
 
 const ESCROW_ABI = parseAbi([
   'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool)',
@@ -61,7 +62,6 @@ export default function AdminPage() {
   const chainOptions = useMemo(getChainOptions, []);
   const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
   const [escrowAddress, setEscrowAddress] = useState('');
-  const [proposalId, setProposalId] = useState('');
   const [status, setStatus] = useState(statusReady());
   const [chainTime, setChainTime] = useState(null);
   const [action, setAction] = useState('');
@@ -78,15 +78,7 @@ export default function AdminPage() {
 
   const chainMismatch = isConnected && targetChainId && chainId !== targetChainId;
 
-  const proposalIdValue = useMemo(() => {
-    const trimmed = proposalId.trim();
-    if (!trimmed) return null;
-    try {
-      return BigInt(trimmed);
-    } catch (error) {
-      return null;
-    }
-  }, [proposalId]);
+
 
   useEffect(() => {
     const active = chainOptions.find((item) => item.id === Number(targetChainId));
@@ -115,16 +107,6 @@ export default function AdminPage() {
     };
   }, [publicClient]);
 
-  const proposalResult = useReadContract({
-    address: isAddress(escrowAddress) ? escrowAddress : undefined,
-    abi: ESCROW_ABI,
-    functionName: 'getProposal',
-    args: proposalIdValue !== null ? [proposalIdValue] : undefined,
-    query: {
-      enabled: isAddress(escrowAddress) && proposalIdValue !== null,
-    },
-  });
-
   const pausedResult = useReadContract({
     address: isAddress(escrowAddress) ? escrowAddress : undefined,
     abi: ESCROW_ABI,
@@ -134,18 +116,9 @@ export default function AdminPage() {
     },
   });
 
-  const proposalStatusValue = Number(readField(proposalResult.data, 'status', 3));
-  const proposalStatusLabel = STATUS_LABELS[lang]?.[proposalStatusValue] || '-';
-  const endTime = readField(proposalResult.data, 'endTime', 1);
 
-  const canFinalizeVoting =
-    proposalStatusValue === 1 &&
-    chainTime !== null &&
-    endTime !== undefined &&
-    chainTime > Number(endTime);
 
-  const canConfirmWinner = proposalStatusValue === 2;
-  const canResolveDispute = proposalStatusValue === 5;
+
 
   const handleSwitchChain = async () => {
     if (!targetChainId) return;
@@ -195,35 +168,7 @@ export default function AdminPage() {
     }
   };
 
-  const handleFinalizeVoting = () =>
-    runAction('finalize', () =>
-      writeContractAsync({
-        address: escrowAddress,
-        abi: ESCROW_ABI,
-        functionName: 'finalizeVoting',
-        args: [proposalIdValue],
-      })
-    );
 
-  const handleConfirmWinner = () =>
-    runAction('confirm', () =>
-      writeContractAsync({
-        address: escrowAddress,
-        abi: ESCROW_ABI,
-        functionName: 'confirmWinnerAndPay10',
-        args: [proposalIdValue],
-      })
-    );
-
-  const handleResolve = (approve) =>
-    runAction(approve ? 'approve' : 'deny', () =>
-      writeContractAsync({
-        address: escrowAddress,
-        abi: ESCROW_ABI,
-        functionName: 'resolveDispute',
-        args: [proposalIdValue, approve],
-      })
-    );
 
   const handlePause = () =>
     runAction(
@@ -263,6 +208,13 @@ export default function AdminPage() {
     setOwnerInputs((current) => (current.length >= 5 ? current : [...current, '']));
   };
 
+  const removeOwner = (index) => {
+    setOwnerInputs((current) => {
+      if (current.length <= 3) return current; // 最少保持 3 个
+      return current.filter((_, i) => i !== index);
+    });
+  };
+
   const handleCreateProposal = () => {
     const owners = ownerInputs.map((item) => item.trim()).filter(Boolean);
     if (owners.length < 3 || owners.length > 5) {
@@ -293,12 +245,12 @@ export default function AdminPage() {
     runAction(
       'create',
       () =>
-      writeContractAsync({
-        address: escrowAddress,
-        abi: ESCROW_ABI,
-        functionName: 'createProposal',
-        args: [owners, start, end],
-      }),
+        writeContractAsync({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'createProposal',
+          args: [owners, start, end],
+        }),
       { requireProposal: false }
     );
   };
@@ -311,58 +263,38 @@ export default function AdminPage() {
           <h1>{t('admin.title')}</h1>
           <p className="lede">{t('admin.lede')}</p>
         </div>
-        <div className="status-card">
-          <div className="status-row">
-            <span>{t('admin.statusLabel')}</span>
-            <span>{proposalStatusLabel}</span>
-          </div>
-          <div className="status-row">
-            <span>{t('voting.window.end')}</span>
-            <span>{formatDateTime(endTime)}</span>
-          </div>
-          <p className="hint">{t('admin.onlyAdmin')}</p>
-        </div>
+
       </section>
 
       <section className="panel">
         <h2>{t('admin.config.title')}</h2>
-        <div className="form-grid">
-          <label className="field">
-            <span>{t('voting.config.contract')}</span>
-            <input
-              value={escrowAddress}
-              placeholder="0x..."
-              onChange={(event) => setEscrowAddress(event.target.value)}
-            />
-            <ExplorerLink
-              chainId={chainId}
-              type="address"
-              value={escrowAddress}
-              label={t('status.contract.link')}
-            />
-          </label>
-          <label className="field">
-            <span>{t('voting.config.network')}</span>
-            <select
-              value={targetChainId}
-              onChange={(event) => setTargetChainId(Number(event.target.value))}
-            >
-              {chainOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label} ({option.id})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>{t('voting.config.proposal')}</span>
-            <input
-              value={proposalId}
-              placeholder="0"
-              onChange={(event) => setProposalId(event.target.value)}
-            />
-          </label>
-        </div>
+        <label className="field full">
+          <span>{t('voting.config.contract')}</span>
+          <input
+            value={escrowAddress}
+            placeholder="0x..."
+            onChange={(event) => setEscrowAddress(event.target.value)}
+          />
+          <ExplorerLink
+            chainId={chainId}
+            type="address"
+            value={escrowAddress}
+            label={t('status.contract.link')}
+          />
+        </label>
+        <label className="field full">
+          <span>{t('voting.config.network')}</span>
+          <select
+            value={targetChainId}
+            onChange={(event) => setTargetChainId(Number(event.target.value))}
+          >
+            {chainOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label} ({option.id})
+              </option>
+            ))}
+          </select>
+        </label>
         {chainMismatch && (
           <div className="notice">
             {t('status.networkMismatch')}
@@ -377,47 +309,7 @@ export default function AdminPage() {
         )}
       </section>
 
-      <section className="panel">
-        <h2>{t('admin.actions.title')}</h2>
-        <div className="actions">
-          <button
-            className="btn primary"
-            onClick={handleFinalizeVoting}
-            disabled={isWriting || action === 'finalize' || !canFinalizeVoting}
-          >
-            {action === 'finalize' ? t('status.loading') : t('admin.finalizeVoting')}
-          </button>
-          <button
-            className="btn ghost"
-            onClick={handleConfirmWinner}
-            disabled={isWriting || action === 'confirm' || !canConfirmWinner}
-          >
-            {action === 'confirm' ? t('status.loading') : t('admin.confirmWinner')}
-          </button>
-          <button
-            className="btn ghost"
-            onClick={() => handleResolve(true)}
-            disabled={isWriting || action === 'approve' || !canResolveDispute}
-          >
-            {action === 'approve' ? t('status.loading') : t('admin.resolveApprove')}
-          </button>
-          <button
-            className="btn ghost"
-            onClick={() => handleResolve(false)}
-            disabled={isWriting || action === 'deny' || !canResolveDispute}
-          >
-            {action === 'deny' ? t('status.loading') : t('admin.resolveDeny')}
-          </button>
-        </div>
-        <StatusNotice status={status} />
-        <div className="status-row">
-          <span>{t('status.tx.latest')}</span>
-          <span className="inline-group">
-            {lastTxHash || '-'}
-            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
-          </span>
-        </div>
-      </section>
+
 
       <section className="panel">
         <h2>{t('admin.pause.title')}</h2>
@@ -444,51 +336,87 @@ export default function AdminPage() {
       </section>
 
       <section className="panel">
-        <h2>{t('admin.create.title')}</h2>
+        <h2>🆕 {t('admin.create.title')}</h2>
         <p className="hint">{t('admin.create.help')}</p>
-        <div className="form-grid">
+
+        <div className="status-row" style={{ marginBottom: '16px' }}>
+          <span>{lang === 'zh' ? 'Topic 数量' : 'Topic Count'}</span>
+          <span style={{ color: ownerInputs.filter(o => o.trim()).length >= 3 ? 'var(--accent)' : 'var(--primary)' }}>
+            {ownerInputs.filter(o => o.trim()).length} / 3-5
+          </span>
+        </div>
+
+        <div className="form-grid" style={{ gap: '12px' }}>
           {ownerInputs.map((value, index) => (
-            <label className="field full" key={`owner-${index}`}>
-              <span>{t('admin.create.owners')}</span>
-              <input
-                value={value}
-                placeholder="0x..."
-                onChange={(event) => updateOwner(index, event.target.value)}
-              />
-            </label>
+            <div key={`owner-${index}`} className="field full" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <span style={{ display: 'block', marginBottom: '4px', fontSize: '0.875rem', textAlign: 'left' }}>
+                  Topic {index + 1} {t('admin.create.owners')}
+                </span>
+                <input
+                  value={value}
+                  placeholder="0x..."
+                  onChange={(event) => updateOwner(index, event.target.value)}
+                  style={{ width: '100%', textAlign: 'left' }}
+                />
+              </div>
+              {ownerInputs.length > 3 && (
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => removeOwner(index)}
+                  style={{ padding: '8px 12px', minWidth: 'auto', marginTop: '20px' }}
+                  title={lang === 'zh' ? '移除' : 'Remove'}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           ))}
+        </div>
+
+        <div className="actions" style={{ marginTop: '12px', marginBottom: '16px' }}>
           {ownerInputs.length < 5 && (
             <button className="btn ghost" type="button" onClick={addOwner}>
-              {t('admin.create.addOwner')}
+              + {t('admin.create.addOwner')}
             </button>
           )}
-          <label className="field">
-            <span>{t('admin.create.start')}</span>
-            <input
+        </div>
+
+        <div className="form-grid" style={{ gap: '16px', marginTop: '16px' }}>
+          <label className="field full">
+            <DateTimePicker
               value={voteStart}
-              placeholder="1700000000"
-              onChange={(event) => setVoteStart(event.target.value)}
+              onChange={setVoteStart}
+              label={t('admin.create.start')}
             />
           </label>
-          <label className="field">
-            <span>{t('admin.create.end')}</span>
-            <input
+          <label className="field full">
+            <DateTimePicker
               value={voteEnd}
-              placeholder="1700003600"
-              onChange={(event) => setVoteEnd(event.target.value)}
+              onChange={setVoteEnd}
+              label={t('admin.create.end')}
             />
           </label>
         </div>
-        <div className="actions">
+
+        <div className="actions" style={{ marginTop: '20px' }}>
           <button
             className="btn primary"
             onClick={handleCreateProposal}
-            disabled={isWriting || action === 'create'}
+            disabled={isWriting || action === 'create' || ownerInputs.filter(o => isAddress(o.trim())).length < 3}
           >
             {action === 'create' ? t('admin.create.submitting') : t('admin.create.submit')}
           </button>
         </div>
         <StatusNotice status={status} />
+        <div className="status-row">
+          <span>{t('status.tx.latest')}</span>
+          <span className="inline-group">
+            {lastTxHash || '-'}
+            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+          </span>
+        </div>
       </section>
     </main>
   );

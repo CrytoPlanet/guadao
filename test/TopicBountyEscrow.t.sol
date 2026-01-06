@@ -5,6 +5,43 @@ import {Test} from "forge-std/Test.sol";
 import {GUAToken} from "../contracts/GUAToken.sol";
 import {TopicBountyEscrow} from "../contracts/TopicBountyEscrow.sol";
 
+contract ReentrantToken is GUAToken {
+    address public reenterTarget;
+    bytes public reenterData;
+    bool public reenterEnabled;
+
+    function setReenter(address target, bytes calldata data) external {
+        reenterTarget = target;
+        reenterData = data;
+        reenterEnabled = true;
+    }
+
+    function clearReenter() external {
+        reenterEnabled = false;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        bool success = super.transfer(to, amount);
+        _maybeReenter();
+        return success;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        bool success = super.transferFrom(from, to, amount);
+        _maybeReenter();
+        return success;
+    }
+
+    function _maybeReenter() internal {
+        if (!reenterEnabled) {
+            return;
+        }
+        reenterEnabled = false;
+        (bool ok,) = reenterTarget.call(reenterData);
+        require(ok, "reenter failed");
+    }
+}
+
 contract TopicBountyEscrowTest is Test {
     TopicBountyEscrow public escrow;
     GUAToken public token;
@@ -688,10 +725,7 @@ contract TopicBountyEscrowTest is Test {
 
         escrow.resolveDispute(proposalId, false);
 
-        assertEq(
-            token.balanceOf(treasury),
-            treasuryBalanceBefore + proposal.remaining90 - 5_000 ether
-        );
+        assertEq(token.balanceOf(treasury), treasuryBalanceBefore + proposal.remaining90 - 5_000 ether);
         assertEq(token.balanceOf(user2), challengerBalanceBefore + 10_000 ether + 5_000 ether);
         assertTrue(escrow.getProposal(proposalId).disputeResolved);
     }
@@ -709,6 +743,50 @@ contract TopicBountyEscrowTest is Test {
         vm.prank(user1);
         vm.expectRevert();
         escrow.resolveDispute(proposalId, true);
+    }
+
+    function test_ResolveDisputeBlocksReentrancy() public {
+        ReentrantToken reentrantToken = new ReentrantToken();
+        address escrowOwner = address(reentrantToken);
+        TopicBountyEscrow reentrantEscrow = new TopicBountyEscrow(address(reentrantToken), escrowOwner, treasury);
+
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        uint64 startTime = uint64(block.timestamp);
+        uint64 endTime = uint64(block.timestamp + 1 days);
+        vm.prank(escrowOwner);
+        uint256 proposalId = reentrantEscrow.createProposal(owners, startTime, endTime);
+
+        reentrantToken.mint(user1, 10 ether);
+        vm.startPrank(user1);
+        reentrantToken.approve(address(reentrantEscrow), 10 ether);
+        reentrantEscrow.stakeVote(proposalId, 0, 10 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        reentrantEscrow.finalizeVoting(proposalId);
+
+        vm.prank(escrowOwner);
+        reentrantEscrow.confirmWinnerAndPay10(proposalId);
+
+        vm.prank(user1);
+        reentrantEscrow.submitDelivery(proposalId, keccak256("url"), keccak256("vid"), keccak256("pin"));
+
+        reentrantToken.mint(user2, 10_000 ether);
+        vm.startPrank(user2);
+        reentrantToken.approve(address(reentrantEscrow), 10_000 ether);
+        reentrantEscrow.challengeDelivery(proposalId, keccak256("reason"), keccak256("evidence"));
+        vm.stopPrank();
+
+        bytes memory reenterData = abi.encodeWithSelector(TopicBountyEscrow.resolveDispute.selector, proposalId, true);
+        reentrantToken.setReenter(address(reentrantEscrow), reenterData);
+
+        vm.prank(escrowOwner);
+        vm.expectRevert();
+        reentrantEscrow.resolveDispute(proposalId, true);
     }
 
     function test_PauseBlocksCreateProposal() public {

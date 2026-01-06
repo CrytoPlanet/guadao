@@ -103,19 +103,59 @@ export default function AirdropPage() {
     setProofsUrl((current) => current || active.proofsUrl || '');
   }, [chainOptions, targetChainId]);
 
+  // 自动加载 proofs.json（非高级模式下）
+  useEffect(() => {
+    if (showAdvanced) return; // 高级模式不自动加载
+    if (proofs) return; // 已加载过
+    if (!proofsUrl) return;
+
+    const autoLoad = async () => {
+      setProofsStatus(statusLoading());
+      try {
+        const response = await fetch(proofsUrl, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const json = await response.json();
+        const parsed = parseProofJson(JSON.stringify(json));
+        setProofs(parsed);
+        setProofsStatus(statusLoaded());
+      } catch (error) {
+        // 静默失败，用户可以手动加载
+        setProofsStatus(statusError('status.error', { message: error.message }));
+      }
+    };
+    autoLoad();
+  }, [showAdvanced, proofsUrl, proofs]);
+
   useEffect(() => {
     if (!address) return;
     setRecipientAddress(address);
     if (!proofs) return;
-    const entry = proofs.proofs?.[normalizeAddress(address)];
+    // 尝试直接匹配或转小写匹配
+    const normalizedAddr = normalizeAddress(address);
+    let entry = proofs.proofs?.[normalizedAddr];
+
+    if (!entry && address) {
+      // 如果找不到，尝试全小写匹配
+      const lowerAddr = address.toLowerCase();
+      // 遍历寻找（性能稍差但更稳健，或者假设 json key 也是小写）
+      entry = proofs.proofs?.[lowerAddr];
+
+      // 如果还找不到，尝试遍历 proofs keys 比较
+      if (!entry && proofs.proofs) {
+        const key = Object.keys(proofs.proofs).find(k => k.toLowerCase() === lowerAddr);
+        if (key) entry = proofs.proofs[key];
+      }
+    }
+
     if (!entry) return;
-    if (!claimAmount) {
+    // 在非高级模式下自动填充
+    if (!claimAmount || !showAdvanced) {
       setClaimAmount(entry.amount);
     }
-    if (!claimProof) {
+    if (!claimProof || !showAdvanced) {
       setClaimProof(JSON.stringify(entry.proof, null, 2));
     }
-  }, [address, proofs, claimAmount, claimProof]);
+  }, [address, proofs, claimAmount, claimProof, showAdvanced]);
 
   useEffect(() => {
     if (claimedResult.isError) {
@@ -136,7 +176,7 @@ export default function AirdropPage() {
   const steps = [
     { label: t('airdrop.guide.connect'), done: isConnected },
     { label: t('airdrop.guide.load'), done: Boolean(proofs) },
-    { label: t('airdrop.guide.claim'), done: claimStatus.kind === 'success' },
+    { label: t('airdrop.guide.claim'), done: claimStatus.kind === 'success' || claimedResult.data === true },
   ];
 
   const loadProofsFromUrl = async () => {
@@ -187,7 +227,23 @@ export default function AirdropPage() {
       setClaimStatus(statusInvalidAddress());
       return;
     }
-    const entry = proofs.proofs?.[normalizeAddress(addressInput)];
+
+    // 尝试直接匹配或转小写匹配
+    const normalizedAddr = normalizeAddress(addressInput);
+    let entry = proofs.proofs?.[normalizedAddr];
+
+    if (!entry) {
+      // 如果找不到，尝试全小写匹配
+      const lowerAddr = addressInput.toLowerCase();
+      entry = proofs.proofs?.[lowerAddr];
+
+      // 如果还找不到，尝试遍历 proofs keys 比较
+      if (!entry && proofs.proofs) {
+        const key = Object.keys(proofs.proofs).find(k => k.toLowerCase() === lowerAddr);
+        if (key) entry = proofs.proofs[key];
+      }
+    }
+
     if (!entry) {
       setClaimStatus(statusError('airdrop.status.notEligible'));
       return;
@@ -417,23 +473,28 @@ export default function AirdropPage() {
         <h2>{t('airdrop.proofs.title')}</h2>
         <div className="form-grid">
           {showAdvanced && (
-            <label className="field">
-              <span>{t('airdrop.proofs.url')}</span>
-              <input
-                value={proofsUrl}
-                onChange={(event) => setProofsUrl(event.target.value)}
-              />
-            </label>
+            <>
+              <label className="field">
+                <span>{t('airdrop.proofs.url')}</span>
+                <input
+                  value={proofsUrl}
+                  onChange={(event) => setProofsUrl(event.target.value)}
+                />
+              </label>
+              <button className="btn ghost" onClick={loadProofsFromUrl}>
+                {t('airdrop.proofs.load')}
+              </button>
+              <label className="field">
+                <span>{t('airdrop.proofs.upload')}</span>
+                <input type="file" accept="application/json" onChange={loadProofsFromFile} />
+              </label>
+            </>
           )}
-          <button className="btn ghost" onClick={loadProofsFromUrl}>
-            {t('airdrop.proofs.load')}
-          </button>
-          <label className="field">
-            <span>{t('airdrop.proofs.upload')}</span>
-            <input type="file" accept="application/json" onChange={loadProofsFromFile} />
-          </label>
         </div>
-        {!showAdvanced && <p className="hint">{t('airdrop.proofs.hint')}</p>}
+        {!showAdvanced && proofs && (
+          <p className="hint" style={{ color: 'var(--accent)' }}>✓ {t('status.loaded')}</p>
+        )}
+        {!showAdvanced && !proofs && <p className="hint">{t('airdrop.proofs.hint')}</p>}
         <StatusNotice status={proofsStatus} />
       </section>
 
@@ -472,9 +533,11 @@ export default function AirdropPage() {
         </div>
         {!showAdvanced && <p className="hint">{t('airdrop.claim.hint')}</p>}
         <div className="actions">
-          <button className="btn ghost" onClick={fillFromProofs}>
-            {t('airdrop.claim.fill')}
-          </button>
+          {showAdvanced && (
+            <button className="btn ghost" onClick={fillFromProofs}>
+              {t('airdrop.claim.fill')}
+            </button>
+          )}
           <button className="btn primary" onClick={handleClaim} disabled={isClaiming}>
             {isClaiming ? t('airdrop.claim.submitting') : t('airdrop.claim.submit')}
           </button>
@@ -489,45 +552,43 @@ export default function AirdropPage() {
         </div>
       </section>
 
-      {showAdvanced && (
-        <section className="panel">
-          <h2>{t('airdrop.admin.title')}</h2>
-          <p className="hint">{t('airdrop.admin.hint')}</p>
-          <div className="form-grid">
-            <label className="field full">
-              <span>{t('airdrop.admin.root.current')}</span>
-              <div className="inline-group">
-                <input
-                  value={rootResult.data || ''}
-                  readOnly
-                />
-                <CopyButton value={rootResult.data} />
-              </div>
-            </label>
-            <label className="field full">
-              <span>{t('airdrop.admin.root.next')}</span>
+      <section className="panel">
+        <h2>{t('airdrop.admin.title')}</h2>
+        <p className="hint">{t('airdrop.admin.hint')}</p>
+        <div className="form-grid">
+          <label className="field full">
+            <span>{t('airdrop.admin.root.current')}</span>
+            <div className="inline-group">
               <input
-                value={rootInput}
-                placeholder="0x..."
-                onChange={(event) => setRootInput(event.target.value)}
+                value={rootResult.data || ''}
+                readOnly
               />
-            </label>
-          </div>
-          <div className="actions">
-            <button className="btn primary" onClick={handleSetRoot} disabled={isClaiming}>
-              {t('airdrop.admin.root.update')}
-            </button>
-          </div>
-          <StatusNotice status={rootStatus} />
-          <div className="status-row">
-            <span>{t('status.tx.latest')}</span>
-            <span className="inline-group">
-              {lastTxHash || '-'}
-              <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
-            </span>
-          </div>
-        </section>
-      )}
+              <CopyButton value={rootResult.data} />
+            </div>
+          </label>
+          <label className="field full">
+            <span>{t('airdrop.admin.root.next')}</span>
+            <input
+              value={rootInput}
+              placeholder="0x..."
+              onChange={(event) => setRootInput(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button className="btn primary" onClick={handleSetRoot} disabled={isClaiming}>
+            {t('airdrop.admin.root.update')}
+          </button>
+        </div>
+        <StatusNotice status={rootStatus} />
+        <div className="status-row">
+          <span>{t('status.tx.latest')}</span>
+          <span className="inline-group">
+            {lastTxHash || '-'}
+            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+          </span>
+        </div>
+      </section>
     </main>
   );
 }

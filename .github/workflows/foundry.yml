@@ -29,7 +29,7 @@ jobs:
             ${{ runner.os }}-foundry-
 
       - name: Install dependencies
-        run: forge install OpenZeppelin/openzeppelin-contracts --no-commit
+        run: forge install OpenZeppelin/openzeppelin-contracts
 
       - name: Build
         run: forge build

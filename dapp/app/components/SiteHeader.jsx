@@ -6,6 +6,7 @@ import { useAccount } from 'wagmi';
 
 import { useI18n } from './LanguageProvider';
 import NetworkStatus from './NetworkStatus';
+import TokenBalance from '../../components/TokenBalance';
 
 const shortAddress = (address) =>
   address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
@@ -29,13 +30,14 @@ export default function SiteHeader() {
       </div>
       <nav className="nav">
         <Link href="/">{t('nav.home')}</Link>
+        <Link href="/features">{lang === 'zh' ? '功能' : 'Guide'}</Link>
         <Link href="/airdrop">{t('nav.airdrop')}</Link>
         <Link href="/proposals">{t('nav.proposals')}</Link>
-        <Link href="/escrow">{t('nav.escrow')}</Link>
-        <Link href="/voting">{t('nav.voting')}</Link>
+        <Link href="/profile">{t('nav.profile')}</Link>
         <Link href="/admin">{t('nav.admin')}</Link>
       </nav>
       <div className="header-actions">
+        {isConnected && <TokenBalance />}
         <button className="lang-toggle" type="button" onClick={toggleLang}>
           {lang === 'zh' ? t('lang.en') : t('lang.zh')}
         </button>
@@ -51,3 +53,4 @@ export default function SiteHeader() {
     </header>
   );
 }
+

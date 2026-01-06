@@ -7,9 +7,10 @@ import {
   useChainId,
   useReadContract,
   useSwitchChain,
+  useWriteContract,
   usePublicClient,
 } from 'wagmi';
-import { isAddress, parseAbi } from 'viem';
+import { isAddress, parseAbi, formatUnits, parseUnits, keccak256, toHex } from 'viem';
 
 import { defaultChainId, getChainOptions } from '../../../lib/appConfig';
 import {
@@ -21,16 +22,36 @@ import {
   statusNetworkMismatch,
   statusNoRpc,
   statusInvalidAddress,
-  statusInvalidProposal,
+  statusTxSubmitted,
+  statusTxConfirming,
+  statusTxConfirmed,
 } from '../../../lib/status';
 import { useI18n } from '../../components/LanguageProvider';
 import CopyButton from '../../components/CopyButton';
 import ExplorerLink from '../../components/ExplorerLink';
 import StatusNotice from '../../components/StatusNotice';
+import ProposalTimeline from '../../../components/ProposalTimeline';
+import ConfirmModal from '../../../components/ConfirmModal';
+import DisabledButton from '../../../components/DisabledButton';
+import GasEstimate from '../../../components/GasEstimate';
 
 const ESCROW_ABI = parseAbi([
   'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool)',
   'function getTopic(uint256 proposalId,uint256 topicId) view returns (address)',
+  'function stakeVote(uint256 proposalId,uint256 topicId,uint256 amount)',
+  'function submitDelivery(uint256 proposalId,bytes32 youtubeUrlHash,bytes32 videoIdHash,bytes32 pinnedCodeHash)',
+  'function challengeDelivery(uint256 proposalId,bytes32 reasonHash,bytes32 evidenceHash)',
+  'function finalizeDelivery(uint256 proposalId)',
+  'function expireIfNoSubmission(uint256 proposalId)',
+  'function finalizeVoting(uint256 proposalId)',
+  'function confirmWinnerAndPay10(uint256 proposalId)',
+  'function resolveDispute(uint256 proposalId,bool approve)',
+  'function owner() view returns (address)',
+]);
+
+const ERC20_ABI = parseAbi([
+  'function approve(address spender,uint256 amount) returns (bool)',
+  'function allowance(address owner,address spender) view returns (uint256)',
 ]);
 
 const ESCROW_EVENTS_ABI = parseAbi([
@@ -49,6 +70,9 @@ const STATUS_LABELS = {
   en: ['Created', 'Voting', 'Voting ended', 'Accepted', 'Submitted', 'Disputed', 'Completed', 'Denied', 'Expired'],
 };
 
+const shortAddress = (address) =>
+  address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
+
 const formatDateTime = (timestamp) => {
   if (!timestamp) return '-';
   const date = new Date(Number(timestamp) * 1000);
@@ -60,6 +84,11 @@ const readField = (proposal, name, index) => {
   if (Object.prototype.hasOwnProperty.call(proposal, name)) return proposal[name];
   if (Array.isArray(proposal)) return proposal[index];
   return undefined;
+};
+
+const toBytes32Hash = (value) => {
+  const text = value?.trim() || '';
+  return keccak256(toHex(text));
 };
 
 const formatLogLabel = (log) => {
@@ -89,13 +118,33 @@ export default function ProposalDetailPage() {
   const chainOptions = useMemo(getChainOptions, []);
   const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
   const [escrowAddress, setEscrowAddress] = useState('');
-  const [fromBlock, setFromBlock] = useState('');
+  const [guaTokenAddress, setGuaTokenAddress] = useState('');
   const [events, setEvents] = useState([]);
   const [status, setStatus] = useState(statusReady());
+  const [topics, setTopics] = useState([]);
+  const [selectedTopic, setSelectedTopic] = useState('');
+  const [voteAmount, setVoteAmount] = useState('');
+  const [chainTime, setChainTime] = useState(null);
+  const [action, setAction] = useState('');
+  const [lastTxHash, setLastTxHash] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const { isConnected } = useAccount();
+  // Delivery fields
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [videoId, setVideoId] = useState('');
+  const [pinnedComment, setPinnedComment] = useState('');
+
+  // Challenge fields
+  const [challengeReason, setChallengeReason] = useState('');
+  const [challengeEvidence, setChallengeEvidence] = useState('');
+
+  // Confirm modal
+  const [confirmModal, setConfirmModal] = useState({ open: false, title: '', message: '', onConfirm: null });
+
+  const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
+  const { writeContractAsync, isPending: isWriting } = useWriteContract();
   const publicClient = usePublicClient();
 
   const proposalIdValue = useMemo(() => {
@@ -110,12 +159,85 @@ export default function ProposalDetailPage() {
 
   const chainMismatch = isConnected && targetChainId && chainId !== targetChainId;
 
+  // Initialize addresses from config
   useEffect(() => {
     const active = chainOptions.find((item) => item.id === Number(targetChainId));
     if (!active) return;
     setEscrowAddress((current) => current || active.escrowAddress || '');
+    setGuaTokenAddress((current) => current || active.guaTokenAddress || '');
   }, [chainOptions, targetChainId]);
 
+  // Update chain time
+  useEffect(() => {
+    if (!publicClient) return undefined;
+    let active = true;
+    const updateTime = async () => {
+      try {
+        const block = await publicClient.getBlock();
+        if (!active) return;
+        setChainTime(Number(block.timestamp));
+      } catch (error) {
+        if (!active) return;
+        setChainTime(null);
+      }
+    };
+    updateTime();
+    const timer = setInterval(updateTime, 15000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [publicClient]);
+
+  const fetchEvents = async () => {
+    if (!publicClient || !isAddress(escrowAddress) || proposalIdValue === null) {
+      return;
+    }
+
+    try {
+      // Don't set global loading status here to avoid flickering logic,
+      // or key it differently. For now, we only set 'loaded' or 'error'.
+      // If we are refreshing, we might not want to show full page loading state.
+      const logs = await Promise.all(
+        ESCROW_EVENTS_ABI.map((event) =>
+          publicClient.getLogs({
+            address: escrowAddress,
+            event,
+            args: { proposalId: proposalIdValue },
+            fromBlock: 0n,
+          })
+        )
+      );
+
+      const flattened = logs.flat();
+      flattened.sort((a, b) => {
+        if (a.blockNumber === b.blockNumber) {
+          return Number(a.logIndex - b.logIndex);
+        }
+        return Number(a.blockNumber - b.blockNumber);
+      });
+
+      setEvents(flattened);
+      // Only update status if it's currently loading or empty
+      setStatus((prev) => {
+        if (prev?.kind === 'loading') return flattened.length ? statusLoaded() : statusEmpty();
+        return prev;
+      });
+    } catch (error) {
+      console.error('Fetch events failed', error);
+    }
+  };
+
+  // Auto-load events
+  useEffect(() => {
+    setStatus(statusLoading());
+    fetchEvents().then(() => {
+      // Initial load
+    });
+  }, [publicClient, escrowAddress, proposalIdValue]);
+
+
+  // Proposal data
   const proposalResult = useReadContract({
     address: isAddress(escrowAddress) ? escrowAddress : undefined,
     abi: ESCROW_ABI,
@@ -125,6 +247,18 @@ export default function ProposalDetailPage() {
       enabled: isAddress(escrowAddress) && proposalIdValue !== null,
     },
   });
+
+  // Contract owner (admin)
+  const ownerResult = useReadContract({
+    address: isAddress(escrowAddress) ? escrowAddress : undefined,
+    abi: ESCROW_ABI,
+    functionName: 'owner',
+    query: {
+      enabled: isAddress(escrowAddress),
+    },
+  });
+
+  const isAdmin = address && ownerResult.data && address.toLowerCase() === ownerResult.data.toLowerCase();
 
   const winnerTopicId = readField(proposalResult.data, 'winnerTopicId', 4);
 
@@ -144,11 +278,125 @@ export default function ProposalDetailPage() {
     },
   });
 
+  // Allowance for voting
+  const allowanceResult = useReadContract({
+    address: isAddress(guaTokenAddress) ? guaTokenAddress : undefined,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args:
+      address && isAddress(escrowAddress)
+        ? [address, escrowAddress]
+        : undefined,
+    query: {
+      enabled: isAddress(guaTokenAddress) && Boolean(address) && isAddress(escrowAddress),
+    },
+  });
+
   const proposalStatusValue = Number(readField(proposalResult.data, 'status', 3));
   const proposalStatusLabel = STATUS_LABELS[lang]?.[proposalStatusValue] || '-';
+  const startTime = readField(proposalResult.data, 'startTime', 0);
+  const endTime = readField(proposalResult.data, 'endTime', 1);
+  const topicCount = readField(proposalResult.data, 'topicCount', 2);
   const submitDeadline = readField(proposalResult.data, 'submitDeadline', 7);
   const challengeWindowEnd = readField(proposalResult.data, 'challengeWindowEnd', 14);
   const remaining90 = readField(proposalResult.data, 'remaining90', 9);
+
+  // Load topics
+  useEffect(() => {
+    const loadTopics = async () => {
+      if (!publicClient || !isAddress(escrowAddress) || proposalIdValue === null) {
+        setTopics([]);
+        return;
+      }
+      if (!topicCount || Number(topicCount) === 0) {
+        setTopics([]);
+        return;
+      }
+      const count = Number(topicCount);
+      const results = [];
+      for (let i = 0; i < count; i += 1) {
+        try {
+          const owner = await publicClient.readContract({
+            address: escrowAddress,
+            abi: ESCROW_ABI,
+            functionName: 'getTopic',
+            args: [proposalIdValue, BigInt(i)],
+          });
+          results.push({ id: i, owner });
+        } catch (error) {
+          results.push({ id: i, owner: null });
+        }
+      }
+      setTopics(results);
+    };
+
+    loadTopics();
+  }, [publicClient, escrowAddress, proposalIdValue, topicCount]);
+
+  // Voting conditions
+  const canVote =
+    isConnected &&
+    proposalStatusValue === 1 &&
+    chainTime !== null &&
+    startTime !== undefined &&
+    endTime !== undefined &&
+    chainTime >= Number(startTime) &&
+    chainTime < Number(endTime);
+
+  const getVoteDisabledReason = () => {
+    if (!isConnected) return t('airdrop.status.disconnected');
+    if (proposalStatusValue !== 1) return t('voting.window.closed');
+    if (chainTime !== null && startTime !== undefined && chainTime < Number(startTime)) {
+      return t('voting.window.closed');
+    }
+    if (chainTime !== null && endTime !== undefined && chainTime >= Number(endTime)) {
+      return t('voting.window.closed');
+    }
+    if (!selectedTopic) return t('voting.topic.select');
+    return null;
+  };
+
+  // Delivery conditions
+  const canSubmitDelivery =
+    isConnected &&
+    proposalStatusValue === 3 &&
+    chainTime !== null &&
+    submitDeadline !== undefined &&
+    chainTime <= Number(submitDeadline);
+
+  const canChallenge =
+    isConnected &&
+    proposalStatusValue === 4 &&
+    chainTime !== null &&
+    challengeWindowEnd !== undefined &&
+    chainTime < Number(challengeWindowEnd);
+
+  const canFinalizeDelivery =
+    isConnected &&
+    proposalStatusValue === 4 &&
+    chainTime !== null &&
+    challengeWindowEnd !== undefined &&
+    chainTime >= Number(challengeWindowEnd);
+
+  const canExpire =
+    isConnected &&
+    proposalStatusValue === 3 &&
+    chainTime !== null &&
+    submitDeadline !== undefined &&
+    chainTime > Number(submitDeadline);
+
+  // Admin conditions
+  const canFinalizeVoting =
+    isAdmin &&
+    proposalStatusValue === 1 &&
+    chainTime !== null &&
+    endTime !== undefined &&
+    chainTime > Number(endTime);
+
+  const canConfirmWinner = isAdmin && proposalStatusValue === 2;
+  const canResolveDispute = isAdmin && proposalStatusValue === 5;
+
+  const allowanceValue = allowanceResult.data ?? 0n;
 
   const handleSwitchChain = async () => {
     if (!targetChainId) return;
@@ -159,65 +407,217 @@ export default function ProposalDetailPage() {
     }
   };
 
-  const loadEvents = async () => {
-    if (!publicClient) {
-      setStatus(statusNoRpc());
-      return;
-    }
-    if (!isAddress(escrowAddress)) {
-      setStatus(statusInvalidAddress());
-      return;
-    }
-    if (proposalIdValue === null) {
-      setStatus(statusInvalidProposal());
-      return;
-    }
-    if (chainMismatch) {
-      setStatus(statusNetworkMismatch());
-      return;
-    }
+  const runAction = async (name, fn, options = {}) => {
+    const { requireConfirm = false, confirmTitle = '', confirmMessage = '' } = options;
 
-    let fromBlockValue = 0n;
-    if (fromBlock.trim()) {
-      try {
-        fromBlockValue = BigInt(fromBlock.trim());
-      } catch (error) {
-        setStatus(statusError('proposals.config.fromBlock'));
+    const execute = async () => {
+      if (!isConnected) {
+        setStatus(statusError('airdrop.status.disconnected'));
         return;
       }
-    }
+      if (!isAddress(escrowAddress)) {
+        setStatus(statusInvalidAddress());
+        return;
+      }
+      if (chainMismatch) {
+        setStatus(statusNetworkMismatch());
+        return;
+      }
+      if (!publicClient) {
+        setStatus(statusNoRpc());
+        return;
+      }
 
-    try {
-      setStatus(statusLoading());
-      const logs = await Promise.all(
-        ESCROW_EVENTS_ABI.map((event) =>
-          publicClient.getLogs({
-            address: escrowAddress,
-            event,
-            args: { proposalId: proposalIdValue },
-            fromBlock: fromBlockValue,
-          })
-        )
-      );
+      try {
+        setAction(name);
+        setStatus(statusTxSubmitted());
+        const hash = await fn();
+        if (hash) setLastTxHash(hash);
+        setStatus(statusTxConfirming());
+        await publicClient.waitForTransactionReceipt({ hash });
+        setStatus(statusTxConfirmed());
 
-      const flattened = logs.flat();
-      flattened.sort((a, b) => {
-        if (a.blockNumber === b.blockNumber) {
-          return Number(a.logIndex - b.logIndex);
-        }
-        return Number(a.blockNumber - b.blockNumber);
+        // Refresh all data
+        await Promise.all([
+          proposalResult.refetch(),
+          allowanceResult.refetch(),
+          ownerResult.refetch(),
+          winnerTopicResult.refetch(),
+          fetchEvents(),
+        ]);
+
+      } catch (error) {
+        const message = error?.shortMessage || error?.message || 'Action failed';
+        setStatus(statusError('status.tx.failed', { reason: message }));
+      } finally {
+        setAction('');
+      }
+    };
+
+    if (requireConfirm) {
+      setConfirmModal({
+        open: true,
+        title: confirmTitle,
+        message: confirmMessage,
+        onConfirm: () => {
+          setConfirmModal({ open: false });
+          execute();
+        },
       });
-
-      setEvents(flattened);
-      setStatus(flattened.length ? statusLoaded() : statusEmpty());
-    } catch (error) {
-      const message = error?.shortMessage || error?.message || 'Load failed';
-      setStatus(statusError('status.error', { message }));
+    } else {
+      execute();
     }
   };
 
+  // Voting actions
+  const handleApprove = () =>
+    runAction('approve', async () => {
+      const amount = parseUnits(voteAmount.trim(), 18);
+      return writeContractAsync({
+        address: guaTokenAddress,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [escrowAddress, amount],
+      });
+    });
+
+  const handleVote = () =>
+    runAction('vote', async () => {
+      const amount = parseUnits(voteAmount.trim(), 18);
+      return writeContractAsync({
+        address: escrowAddress,
+        abi: ESCROW_ABI,
+        functionName: 'stakeVote',
+        args: [proposalIdValue, BigInt(selectedTopic), amount],
+      });
+    });
+
+  // Delivery actions
+  const handleSubmitDelivery = () =>
+    runAction('submit', async () => {
+      return writeContractAsync({
+        address: escrowAddress,
+        abi: ESCROW_ABI,
+        functionName: 'submitDelivery',
+        args: [
+          proposalIdValue,
+          toBytes32Hash(youtubeUrl),
+          toBytes32Hash(videoId),
+          toBytes32Hash(pinnedComment),
+        ],
+      });
+    });
+
+  const handleChallenge = () =>
+    runAction(
+      'challenge',
+      async () => {
+        return writeContractAsync({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'challengeDelivery',
+          args: [
+            proposalIdValue,
+            toBytes32Hash(challengeReason),
+            toBytes32Hash(challengeEvidence),
+          ],
+        });
+      },
+      {
+        requireConfirm: true,
+        confirmTitle: t('ui.confirm.title'),
+        confirmMessage: t('ui.confirm.danger'),
+      }
+    );
+
+  const handleFinalizeDelivery = () =>
+    runAction('finalize', async () => {
+      return writeContractAsync({
+        address: escrowAddress,
+        abi: ESCROW_ABI,
+        functionName: 'finalizeDelivery',
+        args: [proposalIdValue],
+      });
+    });
+
+  const handleExpire = () =>
+    runAction('expire', async () => {
+      return writeContractAsync({
+        address: escrowAddress,
+        abi: ESCROW_ABI,
+        functionName: 'expireIfNoSubmission',
+        args: [proposalIdValue],
+      });
+    });
+
+  // Admin actions
+  const handleFinalizeVoting = () =>
+    runAction(
+      'finalizeVoting',
+      async () => {
+        return writeContractAsync({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'finalizeVoting',
+          args: [proposalIdValue],
+        });
+      },
+      {
+        requireConfirm: true,
+        confirmTitle: t('admin.finalizeVoting'),
+        confirmMessage: t('ui.confirm.danger'),
+      }
+    );
+
+  const handleConfirmWinner = () =>
+    runAction(
+      'confirmWinner',
+      async () => {
+        return writeContractAsync({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'confirmWinnerAndPay10',
+          args: [proposalIdValue],
+        });
+      },
+      {
+        requireConfirm: true,
+        confirmTitle: t('admin.confirmWinner'),
+        confirmMessage: t('ui.confirm.danger'),
+      }
+    );
+
+  const handleResolve = (approve) =>
+    runAction(
+      approve ? 'approveDispute' : 'denyDispute',
+      async () => {
+        return writeContractAsync({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'resolveDispute',
+          args: [proposalIdValue, approve],
+        });
+      },
+      {
+        requireConfirm: true,
+        confirmTitle: approve ? t('admin.resolveApprove') : t('admin.resolveDeny'),
+        confirmMessage: t('ui.confirm.danger'),
+      }
+    );
+
+  const actionLocked = !isConnected || chainMismatch;
+  const isAnyActionRunning = isWriting || action !== '';
+
   return (
     <main className="layout">
+      <ConfirmModal
+        isOpen={confirmModal.open}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={() => setConfirmModal({ open: false })}
+      />
+
       <section className="panel hero">
         <div>
           <p className="eyebrow">{t('proposal.detail.eyebrow')}</p>
@@ -226,11 +626,28 @@ export default function ProposalDetailPage() {
             {proposalIdValue?.toString() || '-'}
           </h1>
           <p className="lede">{t('proposal.detail.lede')}</p>
+          <div className="hero-actions">
+            <button
+              className="mode-toggle"
+              type="button"
+              onClick={() => setShowAdvanced((c) => !c)}
+            >
+              {showAdvanced ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+            </button>
+          </div>
         </div>
         <div className="status-card">
           <div className="status-row">
             <span>{t('escrow.summary.status')}</span>
             <span>{proposalStatusLabel}</span>
+          </div>
+          <div className="status-row">
+            <span>{t('voting.window.start')}</span>
+            <span>{formatDateTime(startTime)}</span>
+          </div>
+          <div className="status-row">
+            <span>{t('voting.window.end')}</span>
+            <span>{formatDateTime(endTime)}</span>
           </div>
           <div className="status-row">
             <span>{t('escrow.summary.winner')}</span>
@@ -239,67 +656,367 @@ export default function ProposalDetailPage() {
               <CopyButton value={winnerTopicResult.data} />
             </span>
           </div>
-          <div className="status-row">
-            <span>{t('escrow.summary.remaining')}</span>
-            <span>{remaining90 !== undefined ? remaining90.toString() : '-'}</span>
-          </div>
-          <p className="hint">{t('status.ready')}</p>
         </div>
       </section>
 
+      {/* Timeline */}
       <section className="panel">
-        <h2>{t('proposals.config.title')}</h2>
-        <div className="form-grid">
-          <label className="field">
-            <span>{t('proposals.config.contract')}</span>
-            <input
-              value={escrowAddress}
-              placeholder="0x..."
-              onChange={(event) => setEscrowAddress(event.target.value)}
-            />
-            <ExplorerLink
-              chainId={chainId}
-              type="address"
-              value={escrowAddress}
-              label={t('status.contract.link')}
-            />
-          </label>
-          <label className="field">
-            <span>{t('proposals.config.network')}</span>
-            <select
-              value={targetChainId}
-              onChange={(event) => setTargetChainId(Number(event.target.value))}
-            >
-              {chainOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label} ({option.id})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>{t('proposals.config.fromBlock')}</span>
-            <input
-              value={fromBlock}
-              placeholder="0"
-              onChange={(event) => setFromBlock(event.target.value)}
-            />
-          </label>
-        </div>
-        {chainMismatch && (
-          <div className="notice">
-            {t('status.networkMismatch')}
-            <button
-              className="btn ghost"
-              onClick={handleSwitchChain}
-              disabled={isSwitching}
-            >
-              {isSwitching ? t('airdrop.config.switching') : t('airdrop.config.switch')}
-            </button>
-          </div>
+        <h2>{t('escrow.steps.title')}</h2>
+        <ProposalTimeline
+          currentStatus={proposalStatusValue}
+          proposal={{
+            startTime,
+            endTime,
+            submitDeadline,
+            challengeWindowEnd,
+            challenger: readField(proposalResult.data, 'challenger', 16),
+          }}
+        />
+        {/* Admin Section - Only for admin */}
+        {isAdmin && (
+          <section className="panel">
+            <h2>{t('admin.actions.title')}</h2>
+
+            <div className="actions">
+              {/* Finalize Voting */}
+              {(proposalStatusValue === 1 || (proposalStatusValue === 2 && !canConfirmWinner)) && (
+                <DisabledButton
+                  className="btn primary"
+                  onClick={handleFinalizeVoting}
+                  disabled={isAnyActionRunning || actionLocked || !canFinalizeVoting}
+                  disabledReason={
+                    !canFinalizeVoting
+                      ? (proposalStatusValue === 1 ? t('voting.window.open') : t('status.invalidState'))
+                      : null
+                  }
+                >
+                  {action === 'finalizeVoting' ? t('status.loading') : t('admin.finalizeVoting')}
+                </DisabledButton>
+              )}
+
+              {/* Confirm Winner */}
+              {(proposalStatusValue === 2) && (
+                <DisabledButton
+                  className="btn primary"
+                  onClick={handleConfirmWinner}
+                  disabled={isAnyActionRunning || actionLocked || !canConfirmWinner}
+                  disabledReason={!canConfirmWinner ? t('status.invalidState') : null}
+                >
+                  {action === 'confirmWinner' ? t('status.loading') : t('admin.confirmWinner')}
+                </DisabledButton>
+              )}
+
+              {/* Resolve Dispute */}
+              {(proposalStatusValue === 5) && (
+                <>
+                  <DisabledButton
+                    className="btn ghost"
+                    onClick={() => handleResolve(true)}
+                    disabled={isAnyActionRunning || actionLocked || !canResolveDispute}
+                  >
+                    {action === 'approveDispute' ? t('status.loading') : t('admin.resolveApprove')}
+                  </DisabledButton>
+                  <DisabledButton
+                    className="btn ghost"
+                    onClick={() => handleResolve(false)}
+                    disabled={isAnyActionRunning || actionLocked || !canResolveDispute}
+                  >
+                    {action === 'denyDispute' ? t('status.loading') : t('admin.resolveDeny')}
+                  </DisabledButton>
+                </>
+              )}
+
+              {/* Show message if no actions available */}
+              {proposalStatusValue !== 1 && proposalStatusValue !== 2 && proposalStatusValue !== 5 && (
+                <p className="muted" style={{ margin: 0 }}>{t('admin.noActions')}</p>
+              )}
+            </div>
+            {status?.messageKey !== 'status.loaded' && <StatusNotice status={status} />}
+          </section>
         )}
+
       </section>
 
+      {/* Voting Section - Show if status is Voting */}
+      {proposalStatusValue === 1 && (
+        <section className="panel">
+          <h2>{t('voting.title')}</h2>
+          <p className="hint">{t('voting.lede')}</p>
+
+          {/* Topic Selection */}
+          <div className="status-grid">
+            {topics.map((topic) => (
+              <label key={topic.id} className="status-row">
+                <span>
+                  {t('voting.topic.select')} #{topic.id}
+                </span>
+                <span className="inline-group">
+                  {shortAddress(topic.owner)}
+                  <CopyButton value={topic.owner} />
+                  <input
+                    type="radio"
+                    name="topic"
+                    value={topic.id}
+                    checked={String(selectedTopic) === String(topic.id)}
+                    onChange={() => setSelectedTopic(String(topic.id))}
+                  />
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div className="form-grid">
+            <label className="field">
+              <span>{t('voting.amount.label')}</span>
+              <input
+                value={voteAmount}
+                placeholder={t('voting.amount.placeholder')}
+                onChange={(e) => setVoteAmount(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>{t('voting.allowance.label')}</span>
+              <input value={formatUnits(allowanceValue, 18)} readOnly />
+            </label>
+          </div>
+
+          {voteAmount && selectedTopic && canVote && (
+            <GasEstimate
+              show={true}
+              contractCall={{
+                address: escrowAddress,
+                abi: ESCROW_ABI,
+                functionName: 'stakeVote',
+                args: [proposalIdValue, BigInt(selectedTopic), parseUnits(voteAmount.trim() || '0', 18)],
+                account: address,
+              }}
+            />
+          )}
+
+          <div className="actions">
+            <DisabledButton
+              className="btn ghost"
+              onClick={handleApprove}
+              disabled={isAnyActionRunning}
+              disabledReason={null}
+            >
+              {action === 'approve' ? t('voting.submitting') : t('voting.approve')}
+            </DisabledButton>
+            <DisabledButton
+              className="btn primary"
+              onClick={handleVote}
+              disabled={isAnyActionRunning || !canVote}
+              disabledReason={getVoteDisabledReason()}
+            >
+              {action === 'vote' ? t('voting.submitting') : t('voting.submit')}
+            </DisabledButton>
+          </div>
+          <StatusNotice status={status} />
+        </section>
+      )}
+
+      {/* Delivery Section - Show if status is Accepted */}
+      {proposalStatusValue === 3 && (
+        <section className="panel">
+          <h2>{t('escrow.delivery.title')}</h2>
+          <p className="hint">{t('escrow.delivery.hint')}</p>
+
+          <div className="form-grid">
+            <label className="field full">
+              <span>{t('escrow.delivery.youtube')}</span>
+              <input
+                value={youtubeUrl}
+                placeholder="https://youtu.be/..."
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                disabled={actionLocked}
+              />
+            </label>
+            <label className="field">
+              <span>{t('escrow.delivery.videoId')}</span>
+              <input
+                value={videoId}
+                placeholder="YouTube video id"
+                onChange={(e) => setVideoId(e.target.value)}
+                disabled={actionLocked}
+              />
+            </label>
+            <label className="field full">
+              <span>{t('escrow.delivery.pinned')}</span>
+              <textarea
+                rows="2"
+                value={pinnedComment}
+                placeholder="GUA-DELIVER:..."
+                onChange={(e) => setPinnedComment(e.target.value)}
+                disabled={actionLocked}
+              />
+            </label>
+          </div>
+
+          <div className="actions">
+            <DisabledButton
+              className="btn primary"
+              onClick={handleSubmitDelivery}
+              disabled={isAnyActionRunning || actionLocked || !canSubmitDelivery}
+              disabledReason={
+                actionLocked
+                  ? '请刷新页面'
+                  : !canSubmitDelivery
+                    ? t('term.submitDeadline.help')
+                    : null
+              }
+            >
+              {action === 'submit' ? t('escrow.delivery.submitting') : t('escrow.delivery.submit')}
+            </DisabledButton>
+          </div>
+          <StatusNotice status={status} />
+        </section>
+      )}
+
+      {/* Challenge & Settlement Section - Show if status is Submitted or Accepted */}
+      {(proposalStatusValue === 4 || (proposalStatusValue === 3 && canExpire)) && (
+        <section className="panel">
+          <h2>{t('escrow.settlement.title')}</h2>
+
+          {proposalStatusValue === 4 && canChallenge && (
+            <>
+              <h3>{t('escrow.challenge.title')}</h3>
+              <div className="form-grid">
+                <label className="field full">
+                  <span>{t('escrow.challenge.reason')}</span>
+                  <input
+                    value={challengeReason}
+                    placeholder={t('ui.optional')}
+                    onChange={(e) => setChallengeReason(e.target.value)}
+                    disabled={actionLocked}
+                  />
+                </label>
+                <label className="field full">
+                  <span>{t('escrow.challenge.evidence')}</span>
+                  <input
+                    value={challengeEvidence}
+                    placeholder={t('ui.optional')}
+                    onChange={(e) => setChallengeEvidence(e.target.value)}
+                    disabled={actionLocked}
+                  />
+                </label>
+              </div>
+
+              <div className="actions">
+                {allowanceValue < parseUnits('10000', 18) ? (
+                  <DisabledButton
+                    className="btn ghost"
+                    onClick={() => runAction('approveBond', async () => {
+                      return writeContractAsync({
+                        address: guaTokenAddress,
+                        abi: ERC20_ABI,
+                        functionName: 'approve',
+                        args: [escrowAddress, parseUnits('10000', 18)],
+                      });
+                    })}
+                    disabled={isAnyActionRunning || actionLocked}
+                    disabledReason={actionLocked ? '请刷新页面' : null}
+                  >
+                    {action === 'approveBond' ? t('escrow.challenge.submitting') : t('escrow.challenge.approveBond')}
+                  </DisabledButton>
+                ) : (
+                  <DisabledButton
+                    className="btn ghost"
+                    onClick={handleChallenge}
+                    disabled={isAnyActionRunning || actionLocked}
+                    disabledReason={actionLocked ? '请刷新页面' : null}
+                  >
+                    {action === 'challenge' ? t('escrow.challenge.submitting') : t('escrow.challenge.submit')}
+                  </DisabledButton>
+                )}
+              </div>
+            </>
+          )}
+
+          <div className="actions">
+            {canFinalizeDelivery && (
+              <DisabledButton
+                className="btn primary"
+                onClick={handleFinalizeDelivery}
+                disabled={isAnyActionRunning || actionLocked}
+                disabledReason={actionLocked ? '请刷新页面' : null}
+              >
+                {action === 'finalize' ? t('escrow.settlement.finalizing') : t('escrow.settlement.finalize')}
+              </DisabledButton>
+            )}
+            {canExpire && (
+              <DisabledButton
+                className="btn ghost"
+                onClick={handleExpire}
+                disabled={isAnyActionRunning || actionLocked}
+                disabledReason={actionLocked ? '请刷新页面' : null}
+              >
+                {action === 'expire' ? t('escrow.settlement.expiring') : t('escrow.settlement.expire')}
+              </DisabledButton>
+            )}
+          </div>
+          <StatusNotice status={status} />
+        </section>
+      )}
+
+
+
+      {/* Advanced Config */}
+      {showAdvanced && (
+        <section className="panel">
+          <h2>{t('proposals.config.title')}</h2>
+          <div className="form-grid">
+            <label className="field">
+              <span>{t('proposals.config.contract')}</span>
+              <input
+                value={escrowAddress}
+                placeholder="0x..."
+                onChange={(e) => setEscrowAddress(e.target.value)}
+              />
+              <ExplorerLink
+                chainId={chainId}
+                type="address"
+                value={escrowAddress}
+                label={t('status.contract.link')}
+              />
+            </label>
+            <label className="field">
+              <span>{t('voting.config.token')}</span>
+              <input
+                value={guaTokenAddress}
+                placeholder="0x..."
+                onChange={(e) => setGuaTokenAddress(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>{t('proposals.config.network')}</span>
+              <select
+                value={targetChainId}
+                onChange={(e) => setTargetChainId(Number(e.target.value))}
+              >
+                {chainOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label} ({option.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {chainMismatch && (
+            <div className="notice">
+              {t('status.networkMismatch')}
+              <button
+                className="btn ghost"
+                onClick={handleSwitchChain}
+                disabled={isSwitching}
+              >
+                {isSwitching ? t('airdrop.config.switching') : t('airdrop.config.switch')}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Proposal Details */}
       <section className="panel">
         <h2>{t('proposal.detail.fields')}</h2>
         <div className="status-grid">
@@ -315,16 +1032,23 @@ export default function ProposalDetailPage() {
             <span>{t('term.challengeWindow')}</span>
             <span>{formatDateTime(challengeWindowEnd)}</span>
           </div>
+          <div className="status-row">
+            <span>{t('escrow.summary.remaining')}</span>
+            <span>{remaining90 !== undefined ? formatUnits(remaining90, 18) + ' GUA' : '-'}</span>
+          </div>
+        </div>
+        <div className="status-row">
+          <span>{t('status.tx.latest')}</span>
+          <span className="inline-group">
+            {lastTxHash || '-'}
+            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+          </span>
         </div>
       </section>
 
+      {/* Events */}
       <section className="panel">
         <h2>{t('proposal.detail.events')}</h2>
-        <div className="actions">
-          <button className="btn primary" onClick={loadEvents}>
-            {t('proposal.detail.loadEvents')}
-          </button>
-        </div>
         <StatusNotice status={status} />
         {events.length === 0 ? (
           <p className="muted">{t('proposal.detail.noEvents')}</p>

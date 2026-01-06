@@ -13,6 +13,15 @@
       "rpcUrl": "https://mainnet.base.org",
       "explorerUrl": "https://basescan.org"
     },
+    "31337": {
+      "label": "Local Anvil",
+      "airdropAddress": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+      "escrowAddress": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+      "guaTokenAddress": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
+      "proofsUrl": "/merkle/proofs.json",
+      "rpcUrl": "http://localhost:8545",
+      "explorerUrl": ""
+    },
     "84532": {
       "label": "Base Sepolia",
       "airdropAddress": "",
@@ -21,15 +30,6 @@
       "proofsUrl": "/merkle/proofs.json",
       "rpcUrl": "https://sepolia.base.org",
       "explorerUrl": "https://sepolia.basescan.org"
-    },
-    "31337": {
-      "label": "Local Anvil",
-      "airdropAddress": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-      "escrowAddress": "",
-      "guaTokenAddress": "",
-      "proofsUrl": "/merkle/proofs.json",
-      "rpcUrl": "http://localhost:8545",
-      "explorerUrl": ""
     }
   }
 }

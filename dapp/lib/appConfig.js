@@ -1,13 +1,24 @@
+import { getAddress, isAddress } from 'viem';
 import appConfig from '../config.json';
+
+// 将地址转换为标准校验和格式
+const normalizeAddress = (addr) => {
+  if (!addr || !isAddress(addr)) return '';
+  try {
+    return getAddress(addr);
+  } catch {
+    return addr;
+  }
+};
 
 export const getChainOptions = () => {
   if (!appConfig.chains) return [];
   return Object.entries(appConfig.chains).map(([id, entry]) => ({
     id: Number(id),
     label: entry.label || id,
-    airdropAddress: entry.airdropAddress || '',
-    escrowAddress: entry.escrowAddress || '',
-    guaTokenAddress: entry.guaTokenAddress || '',
+    airdropAddress: normalizeAddress(entry.airdropAddress),
+    escrowAddress: normalizeAddress(entry.escrowAddress),
+    guaTokenAddress: normalizeAddress(entry.guaTokenAddress),
     proofsUrl: entry.proofsUrl || '',
     rpcUrl: entry.rpcUrl || '',
     explorerUrl: entry.explorerUrl || '',

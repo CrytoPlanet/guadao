@@ -5,6 +5,7 @@ import { ConnectKitButton } from 'connectkit';
 import { useAccount } from 'wagmi';
 
 import { useI18n } from './LanguageProvider';
+import { useAdmin } from './AdminProvider';
 import NetworkStatus from './NetworkStatus';
 import TokenBalance from '../../components/TokenBalance';
 
@@ -14,6 +15,7 @@ const shortAddress = (address) =>
 export default function SiteHeader() {
   const { address, isConnected } = useAccount();
   const { lang, setLang, t } = useI18n();
+  const { isAdmin } = useAdmin();
 
   const toggleLang = () => {
     setLang(lang === 'zh' ? 'en' : 'zh');
@@ -34,7 +36,7 @@ export default function SiteHeader() {
         <Link href="/airdrop">{t('nav.airdrop')}</Link>
         <Link href="/proposals">{t('nav.proposals')}</Link>
         <Link href="/profile">{t('nav.profile')}</Link>
-        <Link href="/admin">{t('nav.admin')}</Link>
+        {isAdmin && <Link href="/admin">{t('nav.admin')}</Link>}
       </nav>
       <div className="header-actions">
         {isConnected && <TokenBalance />}

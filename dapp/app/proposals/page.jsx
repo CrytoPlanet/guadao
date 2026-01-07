@@ -64,12 +64,17 @@ export default function ProposalsPage() {
     return chainOptions.find((item) => item.id === Number(targetChainId));
   }, [chainOptions, targetChainId]);
 
+  // Sync targetChainId with wallet chainId
+  useEffect(() => {
+    if (chainId && chainOptions.some(c => c.id === chainId)) {
+      setTargetChainId(chainId);
+    }
+  }, [chainId, chainOptions]);
+
   // Initialize escrow address from config
   useEffect(() => {
     if (!activeChainConfig) return;
-    if (activeChainConfig.escrowAddress) {
-      setEscrowAddress(activeChainConfig.escrowAddress);
-    }
+    setEscrowAddress(activeChainConfig.escrowAddress || '');
   }, [activeChainConfig]);
 
   // Auto-load proposals when address is available
@@ -107,7 +112,7 @@ export default function ProposalsPage() {
         const logs = await client.getLogs({
           address: escrowAddress,
           event: ESCROW_EVENTS_ABI[0],
-          fromBlock: 0n,
+          fromBlock: activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n,
         });
 
         // Fetch details for each proposal to get status

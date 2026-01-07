@@ -118,11 +118,19 @@ export default function EscrowPage() {
     }
   }, [proposalId]);
 
+  // Sync targetChainId with wallet chainId
+  useEffect(() => {
+    if (chainId && chainOptions.some(c => c.id === chainId)) {
+      setTargetChainId(chainId);
+    }
+  }, [chainId, chainOptions]);
+
+  // Update contract addresses when targetChainId changes
   useEffect(() => {
     const active = chainOptions.find((item) => item.id === Number(targetChainId));
     if (!active) return;
-    setEscrowAddress((current) => current || active.escrowAddress || '');
-    setGuaTokenAddress((current) => current || active.guaTokenAddress || '');
+    setEscrowAddress(active.escrowAddress || '');
+    setGuaTokenAddress(active.guaTokenAddress || '');
   }, [chainOptions, targetChainId]);
 
   useEffect(() => {
@@ -198,9 +206,8 @@ export default function EscrowPage() {
 
   const templateText =
     proposalIdValue !== null
-      ? `GUA-DELIVER:${proposalIdValue.toString()}:${winnerTopicLabel}:${
-          winnerTopicResult.data || '0x...'
-        }:${templateNonce || 'nonce'}`
+      ? `GUA-DELIVER:${proposalIdValue.toString()}:${winnerTopicLabel}:${winnerTopicResult.data || '0x...'
+      }:${templateNonce || 'nonce'}`
       : '';
 
   const youtubeHash = youtubeUrl.trim() ? toBytes32Hash(youtubeUrl) : '';

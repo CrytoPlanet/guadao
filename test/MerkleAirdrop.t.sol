@@ -3,6 +3,7 @@ pragma solidity ^0.8.33;
 
 import {Test} from "forge-std/Test.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {GUAToken} from "../contracts/GUAToken.sol";
 import {MerkleAirdrop} from "../contracts/MerkleAirdrop.sol";
 
@@ -31,14 +32,20 @@ contract MerkleAirdropTest is Test {
         user3 = address(0x3);
         nonOwner = address(0x999);
 
-        // 部署 GUAToken
-        guaToken = new GUAToken();
+        // 部署 GUAToken (via proxy)
+        GUAToken guaTokenImpl = new GUAToken();
+        bytes memory guaData = abi.encodeCall(GUAToken.initialize, (owner));
+        ERC1967Proxy guaProxy = new ERC1967Proxy(address(guaTokenImpl), guaData);
+        guaToken = GUAToken(address(guaProxy));
 
-        // 部署 MerkleAirdrop
-        merkleAirdrop = new MerkleAirdrop(address(guaToken), owner);
+        // 部署 MerkleAirdrop (via proxy)
+        MerkleAirdrop airdropImpl = new MerkleAirdrop();
+        bytes memory airdropData = abi.encodeCall(MerkleAirdrop.initialize, (address(guaToken), owner));
+        ERC1967Proxy airdropProxy = new ERC1967Proxy(address(airdropImpl), airdropData);
+        merkleAirdrop = MerkleAirdrop(address(airdropProxy));
 
-        // 将 GUAToken 的 owner 转移给 MerkleAirdrop
-        guaToken.transferOwnership(address(merkleAirdrop));
+        // 授予 MerkleAirdrop MINTER_ROLE
+        guaToken.grantRole(guaToken.MINTER_ROLE(), address(merkleAirdrop));
 
         // 准备测试数据（用于多节点测试）
         addresses = new address[](3);
@@ -85,7 +92,7 @@ contract MerkleAirdropTest is Test {
     /**
      * @dev 生成两个节点的 proof
      */
-    function getTwoNodeProof(bytes32 leaf, bytes32 otherLeaf) internal pure returns (bytes32[] memory) {
+    function getTwoNodeProof(bytes32, bytes32 otherLeaf) internal pure returns (bytes32[] memory) {
         bytes32[] memory proof = new bytes32[](1);
         proof[0] = otherLeaf;
         return proof;
@@ -307,21 +314,43 @@ contract MerkleAirdropTest is Test {
     }
 
     function test_ClaimBeforeRootSetReverts() public {
-        // 部署新的 airdrop，不设置 root
-        MerkleAirdrop newAirdrop = new MerkleAirdrop(address(guaToken), owner);
-        // 注意：需要先将 GUAToken owner 转回，再转给新 airdrop
-        // 但这里我们测试的是 root 未设置的情况
-        // 实际上需要先转移 owner，但为了测试 root 未设置，我们直接测试
+        // 创建新的代理部署
+        GUAToken newTokenImpl = new GUAToken();
+        bytes memory newTokenData = abi.encodeCall(GUAToken.initialize, (owner));
+        ERC1967Proxy newTokenProxy = new ERC1967Proxy(address(newTokenImpl), newTokenData);
+        GUAToken newToken = GUAToken(address(newTokenProxy));
 
-        // 创建一个新的 GUAToken 用于测试
-        GUAToken newToken = new GUAToken();
-        MerkleAirdrop newAirdrop2 = new MerkleAirdrop(address(newToken), owner);
-        newToken.transferOwnership(address(newAirdrop2));
+        MerkleAirdrop newAirdropImpl = new MerkleAirdrop();
+        bytes memory newAirdropData = abi.encodeCall(MerkleAirdrop.initialize, (address(newToken), owner));
+        ERC1967Proxy newAirdropProxy = new ERC1967Proxy(address(newAirdropImpl), newAirdropData);
+        MerkleAirdrop newAirdrop = MerkleAirdrop(address(newAirdropProxy));
+
+        newToken.grantRole(newToken.MINTER_ROLE(), address(newAirdrop));
 
         uint256 amount = amounts[0];
         bytes32[] memory proof = new bytes32[](0);
 
         vm.expectRevert("MerkleAirdrop: root not set");
-        newAirdrop2.claim(user1, amount, proof);
+        newAirdrop.claim(user1, amount, proof);
+    }
+
+    // ============ 测试：升级 ============
+
+    function test_OwnerCanUpgrade() public {
+        MerkleAirdrop newImpl = new MerkleAirdrop();
+        merkleAirdrop.upgradeToAndCall(address(newImpl), "");
+        // If no revert, upgrade succeeded
+    }
+
+    function test_NonOwnerCannotUpgrade() public {
+        MerkleAirdrop newImpl = new MerkleAirdrop();
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        merkleAirdrop.upgradeToAndCall(address(newImpl), "");
+    }
+
+    function test_CannotInitializeTwice() public {
+        vm.expectRevert();
+        merkleAirdrop.initialize(address(guaToken), owner);
     }
 }

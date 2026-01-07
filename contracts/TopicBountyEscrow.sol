@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.33;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
-contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
+contract TopicBountyEscrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     enum ProposalStatus {
         Created,
         Voting,
@@ -46,8 +48,8 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         address owner;
     }
 
-    IERC20 public immutable guaToken;
-    address public immutable treasury;
+    IERC20 public guaToken;
+    address public treasury;
 
     uint256 public proposalCount;
     mapping(uint256 => Proposal) private proposals;
@@ -82,14 +84,41 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
     event Expired(uint256 indexed proposalId, uint256 amount);
     event EscrowPaused(address indexed account);
     event EscrowUnpaused(address indexed account);
+    event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
 
-    constructor(address _guaToken, address _owner, address _treasury) Ownable(_owner) {
+    /// @dev 禁用构造函数，使用 initialize 代替
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @dev 初始化函数，替代构造函数
+     * @param _guaToken GUA Token 合约地址
+     * @param _owner 合约所有者（管理员）
+     * @param _treasury 国库地址
+     */
+    function initialize(address _guaToken, address _owner, address _treasury) public initializer {
         require(_guaToken != address(0), "TopicBountyEscrow: invalid token");
         require(_owner != address(0), "TopicBountyEscrow: invalid owner");
         require(_treasury != address(0), "TopicBountyEscrow: invalid treasury");
 
+        __Ownable_init(_owner);
+        __Pausable_init();
+
         guaToken = IERC20(_guaToken);
         treasury = _treasury;
+    }
+
+    /**
+     * @dev 设置新的国库地址（仅 Owner）
+     * @param _newTreasury 新的国库地址
+     */
+    function setTreasury(address _newTreasury) external onlyOwner {
+        require(_newTreasury != address(0), "TopicBountyEscrow: invalid treasury");
+        address oldTreasury = treasury;
+        treasury = _newTreasury;
+        emit TreasuryUpdated(oldTreasury, _newTreasury);
     }
 
     function createProposal(address[] calldata topicOwners, uint64 startTime, uint64 endTime)
@@ -338,4 +367,10 @@ contract TopicBountyEscrow is Ownable, Pausable, ReentrancyGuard {
         _unpause();
         emit EscrowUnpaused(msg.sender);
     }
+
+    /**
+     * @dev 授权升级，仅 Owner 可调用
+     * @param newImplementation 新的实现合约地址
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }

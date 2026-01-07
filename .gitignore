@@ -7,6 +7,7 @@ broadcast/
 # Environment variables
 .env
 .env.local
+.env.*.local
 
 # IDE
 .vscode/
@@ -30,4 +31,4 @@ coverage.json
 node_modules/
 dapp/node_modules/
 .next/
-
+dapp/.next/

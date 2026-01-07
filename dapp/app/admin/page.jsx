@@ -37,6 +37,7 @@ const ESCROW_ABI = parseAbi([
   'function pause()',
   'function unpause()',
   'function paused() view returns (bool)',
+  'function owner() view returns (address)',
 ]);
 
 const STATUS_LABELS = {
@@ -70,7 +71,7 @@ export default function AdminPage() {
   const [voteEnd, setVoteEnd] = useState('');
   const [lastTxHash, setLastTxHash] = useState('');
 
-  const { isConnected } = useAccount();
+  const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const { writeContractAsync, isPending: isWriting } = useWriteContract();
@@ -78,12 +79,31 @@ export default function AdminPage() {
 
   const chainMismatch = isConnected && targetChainId && chainId !== targetChainId;
 
+  // Read contract owner
+  const ownerResult = useReadContract({
+    address: isAddress(escrowAddress) ? escrowAddress : undefined,
+    abi: ESCROW_ABI,
+    functionName: 'owner',
+    query: {
+      enabled: isAddress(escrowAddress),
+    },
+  });
 
+  const isAdmin = isConnected && ownerResult.data && address?.toLowerCase() === ownerResult.data.toLowerCase();
+
+
+
+  // Sync targetChainId with wallet chainId
+  useEffect(() => {
+    if (chainId && chainOptions.some(c => c.id === chainId)) {
+      setTargetChainId(chainId);
+    }
+  }, [chainId, chainOptions]);
 
   useEffect(() => {
     const active = chainOptions.find((item) => item.id === Number(targetChainId));
     if (!active) return;
-    setEscrowAddress((current) => current || active.escrowAddress || '');
+    setEscrowAddress(active.escrowAddress || '');
   }, [chainOptions, targetChainId]);
 
   useEffect(() => {
@@ -309,115 +329,131 @@ export default function AdminPage() {
         )}
       </section>
 
+      {!isConnected && (
+        <section className="panel">
+          <p className="hint">{lang === 'zh' ? '请先连接钱包' : 'Please connect wallet first'}</p>
+        </section>
+      )}
 
+      {isConnected && !isAdmin && (
+        <section className="panel">
+          <p className="hint" style={{ color: 'var(--primary)' }}>
+            {lang === 'zh' ? '⚠️ 当前钱包不是合约管理员，无法使用管理功能' : '⚠️ Current wallet is not the contract owner. Admin functions are disabled.'}
+          </p>
+        </section>
+      )}
 
-      <section className="panel">
-        <h2>{t('admin.pause.title')}</h2>
-        <div className="status-row">
-          <span>{t('admin.statusLabel')}</span>
-          <span>{pausedResult.data ? t('admin.pause.paused') : t('admin.pause.unpaused')}</span>
-        </div>
-        <div className="actions">
-          <button
-            className="btn ghost"
-            onClick={handlePause}
-            disabled={isWriting || action === 'pause' || pausedResult.data === true}
-          >
-            {t('admin.pause.action')}
-          </button>
-          <button
-            className="btn ghost"
-            onClick={handleUnpause}
-            disabled={isWriting || action === 'unpause' || pausedResult.data === false}
-          >
-            {t('admin.pause.release')}
-          </button>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h2>🆕 {t('admin.create.title')}</h2>
-        <p className="hint">{t('admin.create.help')}</p>
-
-        <div className="status-row" style={{ marginBottom: '16px' }}>
-          <span>{lang === 'zh' ? 'Topic 数量' : 'Topic Count'}</span>
-          <span style={{ color: ownerInputs.filter(o => o.trim()).length >= 3 ? 'var(--accent)' : 'var(--primary)' }}>
-            {ownerInputs.filter(o => o.trim()).length} / 3-5
-          </span>
-        </div>
-
-        <div className="form-grid" style={{ gap: '12px' }}>
-          {ownerInputs.map((value, index) => (
-            <div key={`owner-${index}`} className="field full" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <span style={{ display: 'block', marginBottom: '4px', fontSize: '0.875rem', textAlign: 'left' }}>
-                  Topic {index + 1} {t('admin.create.owners')}
-                </span>
-                <input
-                  value={value}
-                  placeholder="0x..."
-                  onChange={(event) => updateOwner(index, event.target.value)}
-                  style={{ width: '100%', textAlign: 'left' }}
-                />
-              </div>
-              {ownerInputs.length > 3 && (
-                <button
-                  className="btn ghost"
-                  type="button"
-                  onClick={() => removeOwner(index)}
-                  style={{ padding: '8px 12px', minWidth: 'auto', marginTop: '20px' }}
-                  title={lang === 'zh' ? '移除' : 'Remove'}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="actions" style={{ marginTop: '12px', marginBottom: '16px' }}>
-          {ownerInputs.length < 5 && (
-            <button className="btn ghost" type="button" onClick={addOwner}>
-              + {t('admin.create.addOwner')}
+      {isAdmin && (
+        <section className="panel">
+          <h2>{t('admin.pause.title')}</h2>
+          <div className="status-row">
+            <span>{t('admin.statusLabel')}</span>
+            <span>{pausedResult.data ? t('admin.pause.paused') : t('admin.pause.unpaused')}</span>
+          </div>
+          <div className="actions">
+            <button
+              className="btn ghost"
+              onClick={handlePause}
+              disabled={isWriting || action === 'pause' || pausedResult.data === true}
+            >
+              {t('admin.pause.action')}
             </button>
-          )}
-        </div>
+            <button
+              className="btn ghost"
+              onClick={handleUnpause}
+              disabled={isWriting || action === 'unpause' || pausedResult.data === false}
+            >
+              {t('admin.pause.release')}
+            </button>
+          </div>
+        </section>
+      )}
 
-        <div className="form-grid" style={{ gap: '16px', marginTop: '16px' }}>
-          <label className="field full">
-            <DateTimePicker
-              value={voteStart}
-              onChange={setVoteStart}
-              label={t('admin.create.start')}
-            />
-          </label>
-          <label className="field full">
-            <DateTimePicker
-              value={voteEnd}
-              onChange={setVoteEnd}
-              label={t('admin.create.end')}
-            />
-          </label>
-        </div>
+      {isAdmin && (
+        <section className="panel">
+          <h2>🆕 {t('admin.create.title')}</h2>
+          <p className="hint">{t('admin.create.help')}</p>
 
-        <div className="actions" style={{ marginTop: '20px' }}>
-          <button
-            className="btn primary"
-            onClick={handleCreateProposal}
-            disabled={isWriting || action === 'create' || ownerInputs.filter(o => isAddress(o.trim())).length < 3}
-          >
-            {action === 'create' ? t('admin.create.submitting') : t('admin.create.submit')}
-          </button>
-        </div>
-        <StatusNotice status={status} />
-        <div className="status-row">
-          <span>{t('status.tx.latest')}</span>
-          <span className="inline-group">
-            {lastTxHash || '-'}
-            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
-          </span>
-        </div>
-      </section>
+          <div className="status-row" style={{ marginBottom: '16px' }}>
+            <span>{lang === 'zh' ? 'Topic 数量' : 'Topic Count'}</span>
+            <span style={{ color: ownerInputs.filter(o => o.trim()).length >= 3 ? 'var(--accent)' : 'var(--primary)' }}>
+              {ownerInputs.filter(o => o.trim()).length} / 3-5
+            </span>
+          </div>
+
+          <div className="form-grid" style={{ gap: '12px' }}>
+            {ownerInputs.map((value, index) => (
+              <div key={`owner-${index}`} className="field full" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ display: 'block', marginBottom: '4px', fontSize: '0.875rem', textAlign: 'left' }}>
+                    Topic {index + 1} {t('admin.create.owners')}
+                  </span>
+                  <input
+                    value={value}
+                    placeholder="0x..."
+                    onChange={(event) => updateOwner(index, event.target.value)}
+                    style={{ width: '100%', textAlign: 'left' }}
+                  />
+                </div>
+                {ownerInputs.length > 3 && (
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => removeOwner(index)}
+                    style={{ padding: '8px 12px', minWidth: 'auto', marginTop: '20px' }}
+                    title={lang === 'zh' ? '移除' : 'Remove'}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="actions" style={{ marginTop: '12px', marginBottom: '16px' }}>
+            {ownerInputs.length < 5 && (
+              <button className="btn ghost" type="button" onClick={addOwner}>
+                + {t('admin.create.addOwner')}
+              </button>
+            )}
+          </div>
+
+          <div className="form-grid" style={{ gap: '16px', marginTop: '16px' }}>
+            <label className="field full">
+              <DateTimePicker
+                value={voteStart}
+                onChange={setVoteStart}
+                label={t('admin.create.start')}
+              />
+            </label>
+            <label className="field full">
+              <DateTimePicker
+                value={voteEnd}
+                onChange={setVoteEnd}
+                label={t('admin.create.end')}
+              />
+            </label>
+          </div>
+
+          <div className="actions" style={{ marginTop: '20px' }}>
+            <button
+              className="btn primary"
+              onClick={handleCreateProposal}
+              disabled={isWriting || action === 'create' || ownerInputs.filter(o => isAddress(o.trim())).length < 3}
+            >
+              {action === 'create' ? t('admin.create.submitting') : t('admin.create.submit')}
+            </button>
+          </div>
+          <StatusNotice status={status} />
+          <div className="status-row">
+            <span>{t('status.tx.latest')}</span>
+            <span className="inline-group">
+              {lastTxHash || '-'}
+              <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+            </span>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

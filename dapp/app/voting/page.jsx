@@ -95,11 +95,20 @@ export default function VotingPage() {
     }
   }, [proposalId]);
 
+  // Sync targetChainId with wallet chainId
+  useEffect(() => {
+    if (chainId && chainOptions.some(c => c.id === chainId)) {
+      setTargetChainId(chainId);
+    }
+  }, [chainId, chainOptions]);
+
+  // Update contract addresses when targetChainId changes
   useEffect(() => {
     const active = chainOptions.find((item) => item.id === Number(targetChainId));
     if (!active) return;
-    setEscrowAddress((current) => current || active.escrowAddress || '');
-    setGuaTokenAddress((current) => current || active.guaTokenAddress || '');
+    // Always update addresses based on the selected chain
+    setEscrowAddress(active.escrowAddress || '');
+    setGuaTokenAddress(active.guaTokenAddress || '');
   }, [chainOptions, targetChainId]);
 
   useEffect(() => {

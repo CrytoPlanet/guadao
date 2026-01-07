@@ -95,94 +95,105 @@
 ---
 
 ## 合约与地址（Base）
+<!-- Latest Verification: 2026-01-07 (Chain 84532) -->
 
 > 部署后把占位符替换为真实地址
 
-- Network: **Base**
-- GUA Token: `0x...`
-- MerkleAirdrop (Claim): `0x...`
-- TopicBountyEscrow (Vote+Payout): `0x...`
-- Treasury: `0x...`
-- Admin: `0x...`（建议未来升级为 Safe 多签）
+- Network: **Base Sepolia**
+- GUA Token: `0x13ce0501266fdfd25fda8befe8a92815d1a5af08`
+- MerkleAirdrop (Claim): `0x9b40014cc0b2ef7861ef318a242f0e9051caa979`
+- TopicBountyEscrow (Vote+Payout): `0x09ffd59910d17aa85598f362fcbec05b35978319`
+- Treasury: `0x04caa97d9c6ffbcebf0edd924f110df28989ffcb`
+- Admin: `0x04caa97d9c6ffbcebf0edd924f110df28989ffcb`
 
 ---
 
 ## Repo Structure
 
 ```text
-.
 ├── contracts/
-│   └── GUAToken.sol                 # ✅ GUA Token 合约（ERC-20）
-│   ├── TopicBountyEscrow.sol        # 投票 + 托管 + 10%/90% + 质疑/仲裁
-│   ├── MerkleAirdrop.sol            # 空投/贡献领取（Merkle Claim）
-│   └── Treasury.sol (optional)      # v0.1 可只用地址，不一定要合约
+│   └── (Upgradeable UUPS Contracts) # ✅ GUAToken, TopicBountyEscrow, MerkleAirdrop
 ├── script/
-│   └── Deploy.s.sol                 # ✅ 部署脚本（Foundry）
-│   ├── GenerateMerkleRoot.js        # 生成 Merkle root（Node）
-│   └── SnapshotExample.csv          # 示例领取名单
-├── test/
-│   ├── GUAToken.t.sol               # ✅ GUA Token 测试
-│   ├── MerkleAirdrop.t.sol          # ✅ MerkleAirdrop 测试
-│   └── TopicBountyEscrow.t.sol      # ✅ TopicBountyEscrow 测试├── docs/
-│   ├── spec-v0.1.md                 # 系统规范
-│   ├── pinned-comment-proof.md      # 交付证明说明
-│   └── treasury-ops.md              # Treasury 操作说明
-├── openspec/                        # OpenSpec 规范驱动开发
-│   ├── project.md                   # 项目规范
-│   ├── specs/                       # 当前规范
-│   └── changes/                      # 变更提案
-├── issues/                          # 开发任务清单
-├── foundry.toml                     # ✅ Foundry 配置
-├── INSTALL.md                       # ✅ 安装说明
+│   ├── Deploy.s.sol                 # ✅ 部署脚本（Foundry）
+│   ├── deploy.ps1                   # ✅ Windows 一键部署脚本
+│   ├── deploy.sh                    # ✅ Linux/Mac 一键部署脚本
+│   └── update-config.js             # ✅ 前端配置自动同步脚本
+├── test/                            # ✅ 包含所有合约的单元测试
+├── dapp/                            # ✅ Next.js 前端应用
+│   ├── config.json                  # 自动同步的合约地址配置
+│   └── .env                         # 前端私有配置 (WalletConnect ID)
+├── docs/                            # 系统设计文档
+├── openspec/                        # OpenSpec 规范
+├── foundry.toml                     # Foundry 配置
 └── README.md                        # 本文件
 ```
 
 **状态说明**：
 - ✅ 已完成
 
-## Quick Start（Foundry）
+## Quick Start
 
-### 1) Install Foundry
+### 1) Prerequisites
+- **Foundry**: [Install Guide](https://book.getfoundry.sh/getting-started/installation)
+- **Node.js**: (For frontend & automation scripts)
+- **Git**
+
+### 2) Install Dependencies
 ```bash
-# Windows (PowerShell)
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
+# Install Submodules (Foundry)
+forge install
 
-# macOS / Linux
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
+# Install NPM packages (Frontend & Scripts)
+npm install
+cd dapp && npm install && cd ..
 ```
 
-### 2) Install dependencies
+### 3) Configuration (.env)
+Copy the example environment files and fill in your details:
+
+**Backend (.env)**:
 ```bash
-forge install OpenZeppelin/openzeppelin-contracts --no-commit
-# Forge Std 会随 OpenZeppelin 自动安装
+cp .env.example .env
+# Edit .env and set PRIVATE_KEY, OWNER_ADDRESS, etc.
 ```
 
-### 3) Build
+**Frontend (dapp/.env)**:
+```bash
+cp dapp/.env.template dapp/.env
+# Edit dapp/.env and set NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID
+```
+
+### 4) Build & Test
 ```bash
 forge build
+forge test
 ```
 
-### 4) Test
+### 5) Deploy & Sync (One-Click)
+We provide automation scripts to deploy contracts and sync addresses to the frontend automatically.
+
+**Windows (PowerShell)**:
+```powershell
+.\script\deploy.ps1 -Network sepolia
+```
+
+**Mac / Linux**:
 ```bash
-forge test -vv
+chmod +x script/deploy.sh
+./script/deploy.sh sepolia
 ```
 
-### 5) Format
+This script will:
+1. Deploy UUPS Upgradeable contracts to Base Sepolia.
+2. Verify contracts on BaseScan.
+3. **Automatically update** `dapp/config.json` and this `README.md` with new addresses.
+
+### 6) Run Frontend
 ```bash
-forge fmt
+cd dapp
+npm run dev
 ```
-
-### 6) Deploy (Base Sepolia Testnet)
-```bash
-# 设置环境变量
-export PRIVATE_KEY=your_private_key
-export BASE_ETHERSCAN_API_KEY=your_api_key
-
-# 部署到 Base Sepolia
-forge script script/Deploy.s.sol:Deploy --rpc-url base_sepolia --broadcast --verify
-```
+Open [http://localhost:3000](http://localhost:3000) to interact with the DAO.
 
 ## Treasury Ops（重要）
 

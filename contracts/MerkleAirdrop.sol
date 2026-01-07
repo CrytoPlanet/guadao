@@ -2,17 +2,19 @@
 pragma solidity ^0.8.33;
 
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {GUAToken} from "./GUAToken.sol";
 
 /**
  * @title MerkleAirdrop
- * @dev 基于 Merkle proof 的代币空投合约
+ * @dev 基于 Merkle proof 的代币空投合约（可升级版本）
  * @notice 用户可以通过提供有效的 Merkle proof 领取 GUA Token
  */
-contract MerkleAirdrop is Ownable {
+contract MerkleAirdrop is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @dev GUA Token 合约地址
-    GUAToken public immutable guaToken;
+    GUAToken public guaToken;
 
     /// @dev 当前 Merkle root
     bytes32 public merkleRoot;
@@ -27,14 +29,22 @@ contract MerkleAirdrop is Ownable {
     /// @dev 领取事件
     event Claimed(address indexed to, uint256 amount);
 
+    /// @dev 禁用构造函数，使用 initialize 代替
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
-     * @dev 构造函数
+     * @dev 初始化函数，替代构造函数
      * @param _guaToken GUA Token 合约地址
      * @param _owner 合约所有者（管理员）
      */
-    constructor(address _guaToken, address _owner) Ownable(_owner) {
+    function initialize(address _guaToken, address _owner) public initializer {
         require(_guaToken != address(0), "MerkleAirdrop: invalid token address");
         require(_owner != address(0), "MerkleAirdrop: invalid owner address");
+
+        __Ownable_init(_owner);
 
         guaToken = GUAToken(_guaToken);
     }
@@ -83,4 +93,10 @@ contract MerkleAirdrop is Ownable {
     function claimed(address account) external view returns (bool) {
         return epoch > 0 && claimedEpoch[account] == epoch;
     }
+
+    /**
+     * @dev 授权升级，仅 Owner 可调用
+     * @param newImplementation 新的实现合约地址
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }

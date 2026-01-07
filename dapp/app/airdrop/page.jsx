@@ -26,6 +26,7 @@ import {
   statusTxConfirmed,
 } from '../../lib/status';
 import { useI18n } from '../components/LanguageProvider';
+import { useAdmin } from '../components/AdminProvider';
 import CopyButton from '../components/CopyButton';
 import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
@@ -52,6 +53,7 @@ const parseProofJson = (text) => {
 
 export default function AirdropPage() {
   const { t } = useI18n();
+  const { isAdmin } = useAdmin();
   const chainOptions = useMemo(getChainOptions, []);
   const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
   const [contractAddress, setContractAddress] = useState('');
@@ -96,11 +98,19 @@ export default function AirdropPage() {
     },
   });
 
+  // Sync targetChainId with wallet chainId
+  useEffect(() => {
+    if (chainId && chainOptions.some(c => c.id === chainId)) {
+      setTargetChainId(chainId);
+    }
+  }, [chainId, chainOptions]);
+
+  // Update contract addresses when targetChainId changes
   useEffect(() => {
     const active = chainOptions.find((item) => item.id === Number(targetChainId));
     if (!active) return;
-    setContractAddress((current) => current || active.airdropAddress || '');
-    setProofsUrl((current) => current || active.proofsUrl || '');
+    setContractAddress(active.airdropAddress || '');
+    setProofsUrl(active.proofsUrl || '');
   }, [chainOptions, targetChainId]);
 
   // 自动加载 proofs.json（非高级模式下）
@@ -552,43 +562,45 @@ export default function AirdropPage() {
         </div>
       </section>
 
-      <section className="panel">
-        <h2>{t('airdrop.admin.title')}</h2>
-        <p className="hint">{t('airdrop.admin.hint')}</p>
-        <div className="form-grid">
-          <label className="field full">
-            <span>{t('airdrop.admin.root.current')}</span>
-            <div className="inline-group">
+      {isAdmin && (
+        <section className="panel">
+          <h2>{t('airdrop.admin.title')}</h2>
+          <p className="hint">{t('airdrop.admin.hint')}</p>
+          <div className="form-grid">
+            <label className="field full">
+              <span>{t('airdrop.admin.root.current')}</span>
+              <div className="inline-group">
+                <input
+                  value={rootResult.data || ''}
+                  readOnly
+                />
+                <CopyButton value={rootResult.data} />
+              </div>
+            </label>
+            <label className="field full">
+              <span>{t('airdrop.admin.root.next')}</span>
               <input
-                value={rootResult.data || ''}
-                readOnly
+                value={rootInput}
+                placeholder="0x..."
+                onChange={(event) => setRootInput(event.target.value)}
               />
-              <CopyButton value={rootResult.data} />
-            </div>
-          </label>
-          <label className="field full">
-            <span>{t('airdrop.admin.root.next')}</span>
-            <input
-              value={rootInput}
-              placeholder="0x..."
-              onChange={(event) => setRootInput(event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="actions">
-          <button className="btn primary" onClick={handleSetRoot} disabled={isClaiming}>
-            {t('airdrop.admin.root.update')}
-          </button>
-        </div>
-        <StatusNotice status={rootStatus} />
-        <div className="status-row">
-          <span>{t('status.tx.latest')}</span>
-          <span className="inline-group">
-            {lastTxHash || '-'}
-            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
-          </span>
-        </div>
-      </section>
+            </label>
+          </div>
+          <div className="actions">
+            <button className="btn primary" onClick={handleSetRoot} disabled={isClaiming}>
+              {t('airdrop.admin.root.update')}
+            </button>
+          </div>
+          <StatusNotice status={rootStatus} />
+          <div className="status-row">
+            <span>{t('status.tx.latest')}</span>
+            <span className="inline-group">
+              {lastTxHash || '-'}
+              <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+            </span>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

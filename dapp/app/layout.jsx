@@ -7,6 +7,11 @@ import SiteHeader from './components/SiteHeader';
 export const metadata = {
   title: 'GUA dApp',
   description: 'GUA airdrop and escrow dApp',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }) {

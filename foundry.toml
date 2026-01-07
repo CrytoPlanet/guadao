@@ -6,6 +6,10 @@ via_ir = false
 evm_version = "paris"
 # 抑制来自依赖库的警告（可选，不影响功能）
 # 这些警告来自 forge-std 库，可以安全忽略
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/"
+]
 
 [rpc_endpoints]
 base = "https://mainnet.base.org"
@@ -14,4 +18,5 @@ base_sepolia = "https://sepolia.base.org"
 [etherscan]
 base = { key = "${BASE_ETHERSCAN_API_KEY}" }
 base_sepolia = { key = "${BASE_ETHERSCAN_API_KEY}" }
+
 

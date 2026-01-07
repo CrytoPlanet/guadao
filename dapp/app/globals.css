@@ -363,13 +363,27 @@ textarea {
 }
 
 .explorer-link {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 4px 10px;
   font-family: var(--font-title);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   text-decoration: none;
-  color: var(--ink);
+  transition: background 0.2s, color 0.2s;
+}
+
+.explorer-link::before {
+  content: '↗';
+  font-size: 0.85rem;
+}
+
+.explorer-link:hover {
+  background: var(--accent);
+  color: #fff;
 }
 
 .guide {

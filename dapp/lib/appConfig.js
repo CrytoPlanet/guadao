@@ -22,6 +22,7 @@ export const getChainOptions = () => {
     proofsUrl: entry.proofsUrl || '',
     rpcUrl: entry.rpcUrl || '',
     explorerUrl: entry.explorerUrl || '',
+    startBlock: entry.startBlock || 0,
   }));
 };
 

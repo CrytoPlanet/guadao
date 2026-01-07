@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
   useAccount,
@@ -157,14 +157,25 @@ export default function ProposalDetailPage() {
     }
   }, [params]);
 
+  const activeChainConfig = useMemo(() => {
+    return chainOptions.find((item) => item.id === Number(targetChainId));
+  }, [chainOptions, targetChainId]);
+
   const chainMismatch = isConnected && targetChainId && chainId !== targetChainId;
+
+  // Sync targetChainId with wallet chainId
+  useEffect(() => {
+    if (chainId && chainOptions.some(c => c.id === chainId)) {
+      setTargetChainId(chainId);
+    }
+  }, [chainId, chainOptions]);
 
   // Initialize addresses from config
   useEffect(() => {
     const active = chainOptions.find((item) => item.id === Number(targetChainId));
     if (!active) return;
-    setEscrowAddress((current) => current || active.escrowAddress || '');
-    setGuaTokenAddress((current) => current || active.guaTokenAddress || '');
+    setEscrowAddress(active.escrowAddress || '');
+    setGuaTokenAddress(active.guaTokenAddress || '');
   }, [chainOptions, targetChainId]);
 
   // Update chain time
@@ -189,7 +200,7 @@ export default function ProposalDetailPage() {
     };
   }, [publicClient]);
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     if (!publicClient || !isAddress(escrowAddress) || proposalIdValue === null) {
       return;
     }
@@ -204,7 +215,7 @@ export default function ProposalDetailPage() {
             address: escrowAddress,
             event,
             args: { proposalId: proposalIdValue },
-            fromBlock: 0n,
+            fromBlock: activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n,
           })
         )
       );
@@ -226,7 +237,7 @@ export default function ProposalDetailPage() {
     } catch (error) {
       console.error('Fetch events failed', error);
     }
-  };
+  }, [publicClient, escrowAddress, proposalIdValue, activeChainConfig]);
 
   // Auto-load events
   useEffect(() => {
@@ -234,7 +245,7 @@ export default function ProposalDetailPage() {
     fetchEvents().then(() => {
       // Initial load
     });
-  }, [publicClient, escrowAddress, proposalIdValue]);
+  }, [fetchEvents]);
 
 
   // Proposal data

@@ -1,0 +1,11 @@
+{
+    "name": "Guadao Airdrop",
+    "description": "Claim your GUA tokens securely.",
+    "icons": [
+        {
+            "src": "icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        }
+    ]
+}

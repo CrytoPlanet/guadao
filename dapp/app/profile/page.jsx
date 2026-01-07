@@ -31,18 +31,26 @@ const shortAddress = (address) =>
 
 export default function ProfilePage() {
     const { t } = useI18n();
+    const { address, isConnected } = useAccount();
+    const chainId = useChainId();
+    const publicClient = usePublicClient();
+
     const chainOptions = useMemo(getChainOptions, []);
     const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
+
+    // Sync targetChainId with wallet chainId
+    useEffect(() => {
+        if (chainId && chainOptions.some(c => c.id === chainId)) {
+            setTargetChainId(chainId);
+        }
+    }, [chainId, chainOptions]);
+
     const [votes, setVotes] = useState([]);
     const [challenges, setChallenges] = useState([]);
     const [topics, setTopics] = useState([]);
     const [votesStatus, setVotesStatus] = useState(statusEmpty());
     const [challengesStatus, setChallengesStatus] = useState(statusEmpty());
     const [topicsStatus, setTopicsStatus] = useState(statusEmpty());
-
-    const { address, isConnected } = useAccount();
-    const chainId = useChainId();
-    const publicClient = usePublicClient();
 
     const chainConfig = useMemo(() => {
         return chainOptions.find((c) => c.id === Number(targetChainId));
@@ -68,7 +76,7 @@ export default function ProfilePage() {
                     address: airdropAddress,
                     event: parseAbi(['event Claimed(address indexed to, uint256 amount)'])[0],
                     args: { to: address },
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
                 });
 
                 const mapped = logs.map((log) => ({
@@ -88,7 +96,7 @@ export default function ProfilePage() {
         if (isConnected) {
             loadAirdrops();
         }
-    }, [publicClient, airdropAddress, address, isConnected]);
+    }, [publicClient, airdropAddress, address, isConnected, chainConfig]);
 
     const escrowAddress = chainConfig?.escrowAddress || '';
 
@@ -106,7 +114,7 @@ export default function ProfilePage() {
                     address: escrowAddress,
                     event: ESCROW_EVENTS_ABI[0], // Voted event
                     args: { voter: address },
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
                 });
 
                 const mapped = logs.map((log) => ({
@@ -128,7 +136,7 @@ export default function ProfilePage() {
         if (isConnected) {
             loadVotes();
         }
-    }, [publicClient, escrowAddress, address, isConnected]);
+    }, [publicClient, escrowAddress, address, isConnected, chainConfig]);
 
     // 加载用户质疑记录
     useEffect(() => {
@@ -144,7 +152,7 @@ export default function ProfilePage() {
                     address: escrowAddress,
                     event: ESCROW_EVENTS_ABI[1], // DeliveryChallenged event
                     args: { challenger: address },
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
                 });
 
                 const mapped = logs.map((log) => ({
@@ -164,7 +172,7 @@ export default function ProfilePage() {
         if (isConnected) {
             loadChallenges();
         }
-    }, [publicClient, escrowAddress, address, isConnected]);
+    }, [publicClient, escrowAddress, address, isConnected, chainConfig]);
 
     // 加载用户的 Topic
     useEffect(() => {
@@ -179,7 +187,7 @@ export default function ProfilePage() {
                 const logs = await publicClient.getLogs({
                     address: escrowAddress,
                     event: ESCROW_EVENTS_ABI[2], // ProposalCreated event
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
                 });
 
                 const userTopics = [];
@@ -210,7 +218,7 @@ export default function ProfilePage() {
         if (isConnected) {
             loadTopics();
         }
-    }, [publicClient, escrowAddress, address, isConnected]);
+    }, [publicClient, escrowAddress, address, isConnected, chainConfig]);
 
     return (
         <main className="layout">

@@ -7,6 +7,7 @@ import { ConnectKitProvider } from 'connectkit';
 
 import { config } from '../lib/wagmi';
 import { LanguageProvider } from './components/LanguageProvider';
+import { AdminProvider } from './components/AdminProvider';
 
 export default function Providers({ children }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -15,7 +16,9 @@ export default function Providers({ children }) {
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <ConnectKitProvider theme="nouns" mode="light">
-          <LanguageProvider>{children}</LanguageProvider>
+          <LanguageProvider>
+            <AdminProvider>{children}</AdminProvider>
+          </LanguageProvider>
         </ConnectKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

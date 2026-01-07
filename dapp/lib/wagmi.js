@@ -1,6 +1,6 @@
 import { createConfig, http } from 'wagmi';
 import { base, baseSepolia, foundry } from 'viem/chains';
-import { injected, walletConnect, coinbaseWallet } from 'wagmi/connectors';
+import { injected, walletConnect, coinbaseWallet, safe } from 'wagmi/connectors';
 
 import appConfig from '../config.json';
 
@@ -26,6 +26,7 @@ const projectId =
   '';
 
 const connectors = [
+  safe(),
   injected(),
   ...(projectId
     ? [

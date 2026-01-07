@@ -31,6 +31,10 @@ const shortAddress = (address) =>
 
 export default function ProfilePage() {
     const { t } = useI18n();
+    const { address, isConnected } = useAccount();
+    const chainId = useChainId();
+    const publicClient = usePublicClient();
+
     const chainOptions = useMemo(getChainOptions, []);
     const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
 
@@ -40,16 +44,13 @@ export default function ProfilePage() {
             setTargetChainId(chainId);
         }
     }, [chainId, chainOptions]);
+
     const [votes, setVotes] = useState([]);
     const [challenges, setChallenges] = useState([]);
     const [topics, setTopics] = useState([]);
     const [votesStatus, setVotesStatus] = useState(statusEmpty());
     const [challengesStatus, setChallengesStatus] = useState(statusEmpty());
     const [topicsStatus, setTopicsStatus] = useState(statusEmpty());
-
-    const { address, isConnected } = useAccount();
-    const chainId = useChainId();
-    const publicClient = usePublicClient();
 
     const chainConfig = useMemo(() => {
         return chainOptions.find((c) => c.id === Number(targetChainId));

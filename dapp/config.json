@@ -29,7 +29,8 @@
       "guaTokenAddress": "0x13ce0501266fdfd25fda8befe8a92815d1a5af08",
       "proofsUrl": "/merkle/proofs.json",
       "rpcUrl": "https://sepolia.base.org",
-      "explorerUrl": "https://sepolia.basescan.org"
+      "explorerUrl": "https://sepolia.basescan.org",
+      "startBlock": 36008163
     }
   }
 }

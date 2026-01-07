@@ -112,7 +112,7 @@ export default function ProposalsPage() {
         const logs = await client.getLogs({
           address: escrowAddress,
           event: ESCROW_EVENTS_ABI[0],
-          fromBlock: 0n,
+          fromBlock: activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 'earliest',
         });
 
         // Fetch details for each proposal to get status

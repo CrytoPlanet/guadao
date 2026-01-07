@@ -157,6 +157,10 @@ export default function ProposalDetailPage() {
     }
   }, [params]);
 
+  const activeChainConfig = useMemo(() => {
+    return chainOptions.find((item) => item.id === Number(targetChainId));
+  }, [chainOptions, targetChainId]);
+
   const chainMismatch = isConnected && targetChainId && chainId !== targetChainId;
 
   // Sync targetChainId with wallet chainId
@@ -211,7 +215,7 @@ export default function ProposalDetailPage() {
             address: escrowAddress,
             event,
             args: { proposalId: proposalIdValue },
-            fromBlock: 0n,
+            fromBlock: activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 'earliest',
           })
         )
       );

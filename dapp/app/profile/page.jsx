@@ -75,7 +75,7 @@ export default function ProfilePage() {
                     address: airdropAddress,
                     event: parseAbi(['event Claimed(address indexed to, uint256 amount)'])[0],
                     args: { to: address },
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 'earliest',
                 });
 
                 const mapped = logs.map((log) => ({
@@ -113,7 +113,7 @@ export default function ProfilePage() {
                     address: escrowAddress,
                     event: ESCROW_EVENTS_ABI[0], // Voted event
                     args: { voter: address },
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 'earliest',
                 });
 
                 const mapped = logs.map((log) => ({
@@ -151,7 +151,7 @@ export default function ProfilePage() {
                     address: escrowAddress,
                     event: ESCROW_EVENTS_ABI[1], // DeliveryChallenged event
                     args: { challenger: address },
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 'earliest',
                 });
 
                 const mapped = logs.map((log) => ({
@@ -186,7 +186,7 @@ export default function ProfilePage() {
                 const logs = await publicClient.getLogs({
                     address: escrowAddress,
                     event: ESCROW_EVENTS_ABI[2], // ProposalCreated event
-                    fromBlock: 0n,
+                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 'earliest',
                 });
 
                 const userTopics = [];

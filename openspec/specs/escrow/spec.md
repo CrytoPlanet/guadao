@@ -31,3 +31,21 @@ TBD - created by archiving change update-escrow-lifecycle-v0.1. Update Purpose a
 - **WHEN** 超过挑战窗口
 - **THEN** challengeDelivery 调用 MUST revert
 
+### Requirement: 紧急暂停（Pausable）
+Escrow 合约 SHALL 支持管理员启用/解除暂停，用于紧急停止资金相关操作。
+
+#### Scenario: 暂停后限制
+- **WHEN** 合约处于暂停状态
+- **THEN** 资金相关函数调用被拒绝
+
+#### Scenario: 恢复后可用
+- **WHEN** 管理员解除暂停
+- **THEN** 资金相关函数可正常执行
+
+### Requirement: 结算流程重入保护
+Escrow 合约 SHALL 对所有资金转移相关函数启用重入保护。
+
+#### Scenario: 结算路径
+- **WHEN** 调用支付/结算相关函数
+- **THEN** 合约阻止重入攻击并保持状态一致
+

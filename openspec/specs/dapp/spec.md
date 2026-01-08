@@ -115,3 +115,78 @@ TBD - created by archiving change add-dapp-admin-voting. Update Purpose after ar
 - **WHEN** 用户查看 Proposal 详情
 - **THEN** 页面展示相关事件列表与时间顺序
 
+### Requirement: 可追踪与可观测体验
+dApp SHALL 提供交易哈希、合约地址与区块浏览器链接，并展示链 ID、RPC 状态与区块时间。
+
+#### Scenario: 交易追踪
+- **WHEN** 用户提交交易并完成
+- **THEN** 页面展示可点击的区块浏览器链接
+
+#### Scenario: 环境可观测
+- **WHEN** 用户打开任意页面
+- **THEN** 页面显示链 ID、RPC 状态与区块时间
+
+### Requirement: 运维控制入口
+dApp SHALL 提供管理员 Pause/Unpause 操作入口。
+
+#### Scenario: 暂停与恢复
+- **WHEN** 管理员触发 Pause 或 Unpause
+- **THEN** 页面提示当前暂停状态
+
+### Requirement: 统一状态提示
+系统 SHALL 提供统一的状态提示组件（加载/成功/错误/空）。
+
+#### Scenario: 统一展示
+- **WHEN** 页面进入加载、成功、错误或空状态
+- **THEN** 使用统一的状态组件展示
+
+### Requirement: 统一错误提示
+系统 SHALL 统一网络、RPC、地址校验等错误提示。
+
+#### Scenario: RPC 不可用
+- **WHEN** RPC 不可用
+- **THEN** 页面展示一致的错误提示与下一步指引
+
+### Requirement: 统一交易反馈
+系统 SHALL 统一交易提交流程提示（提交/确认/完成）。
+
+#### Scenario: 交易完成
+- **WHEN** 交易确认完成
+- **THEN** 状态提示更新为完成并提供操作结果
+
+### Requirement: 激励 Merkle root 管理入口
+dApp SHALL 提供管理员入口以更新 Airdrop/Merkle root，支持按期激励发放。
+
+#### Scenario: 管理员更新 root
+- **WHEN** 管理员输入 Merkle root 并提交
+- **THEN** 前端调用合约更新 root 并显示交易状态
+
+### Requirement: 交付证明模板与哈希提示
+dApp SHALL 在交付页面提供固定模板、nonce 生成与哈希提示，帮助用户生成可提交的交付证明。
+
+#### Scenario: 生成交付模板
+- **WHEN** 用户进入交付页面并输入必要字段
+- **THEN** 页面展示 `GUA-DELIVER` 模板与自动生成的 nonce
+
+#### Scenario: 提交前提示
+- **WHEN** 用户准备提交交付证明
+- **THEN** 页面提示将对链接、视频 ID 与置顶评论进行哈希后提交
+
+### Requirement: 引导式新手体验
+dApp SHALL 提供步骤式引导流程，默认以“新手模式”呈现，隐藏高级选项并简化输入。
+
+#### Scenario: 新手完成空投
+- **WHEN** 新手进入空投页面
+- **THEN** 通过分步引导完成领取，且无需理解复杂术语
+
+#### Scenario: 切换高级模式
+- **WHEN** 用户开启高级模式
+- **THEN** 显示全部高级输入与调试信息
+
+### Requirement: 清晰美观的视觉体系
+dApp SHALL 使用统一的视觉语言与排版规则，并保持移动端友好。
+
+#### Scenario: 视觉一致性
+- **WHEN** 用户浏览不同页面
+- **THEN** 颜色、字体、组件风格一致且易读
+

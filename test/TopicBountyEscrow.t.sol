@@ -36,6 +36,22 @@ contract TopicBountyEscrowTest is Test {
         bytes memory escrowData = abi.encodeCall(TopicBountyEscrow.initialize, (address(token), owner, treasury));
         ERC1967Proxy escrowProxy = new ERC1967Proxy(address(escrowImpl), escrowData);
         escrow = TopicBountyEscrow(address(escrowProxy));
+
+        // Mint deposit tokens to test contract for creating proposals
+        token.mint(address(this), 10_000 ether);
+        token.approve(address(escrow), type(uint256).max);
+    }
+
+    /// @dev Helper to create proposal with new signature (includes contentCids)
+    function _createProposal(address[] memory topicOwners, uint64 startTime, uint64 endTime)
+        internal
+        returns (uint256 proposalId)
+    {
+        bytes32[] memory contentCids = new bytes32[](topicOwners.length);
+        for (uint256 i = 0; i < topicOwners.length; i++) {
+            contentCids[i] = keccak256(abi.encodePacked("topic", i));
+        }
+        proposalId = escrow.createProposal(topicOwners, contentCids, bytes32(0), startTime, endTime);
     }
 
     function _createDisputedProposal() internal returns (uint256 proposalId) {
@@ -46,7 +62,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        proposalId = escrow.createProposal(owners, startTime, endTime);
+        proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.startPrank(user1);
@@ -77,7 +93,7 @@ contract TopicBountyEscrowTest is Test {
         uint64 startTime = uint64(block.timestamp + 1);
         uint64 endTime = uint64(block.timestamp + 7 days);
 
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
         assertEq(proposalId, 1);
         assertEq(escrow.proposalCount(), 1);
 
@@ -112,12 +128,11 @@ contract TopicBountyEscrowTest is Test {
     }
 
     function test_CreateProposalRejectsInvalidTopicCount() public {
-        address[] memory owners = new address[](2);
-        owners[0] = user1;
-        owners[1] = user2;
+        // Test with 0 topics (below minimum of 1)
+        address[] memory owners = new address[](0);
 
         vm.expectRevert("TopicBountyEscrow: invalid topic count");
-        escrow.createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
+        _createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
     }
 
     function test_CreateProposalRejectsInvalidOwner() public {
@@ -127,7 +142,7 @@ contract TopicBountyEscrowTest is Test {
         owners[2] = user3;
 
         vm.expectRevert("TopicBountyEscrow: invalid topic owner");
-        escrow.createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
+        _createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
     }
 
     function test_CreateProposalRejectsInvalidWindow() public {
@@ -137,18 +152,44 @@ contract TopicBountyEscrowTest is Test {
         owners[2] = user3;
 
         vm.expectRevert("TopicBountyEscrow: invalid window");
-        escrow.createProposal(owners, uint64(block.timestamp + 2), uint64(block.timestamp + 1));
+        _createProposal(owners, uint64(block.timestamp + 2), uint64(block.timestamp + 1));
     }
 
-    function test_NonOwnerCannotCreateProposal() public {
+    function test_NonOwnerCanCreateProposalWithDeposit() public {
         address[] memory owners = new address[](3);
         owners[0] = user1;
         owners[1] = user2;
         owners[2] = user3;
 
-        vm.prank(user1);
-        vm.expectRevert();
-        escrow.createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
+        // user1 is not owner, needs deposit
+        token.mint(user1, 100 ether);
+        vm.startPrank(user1);
+        token.approve(address(escrow), 100 ether);
+        _createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
+        vm.stopPrank();
+
+        // Assert deposit was transferred
+        assertEq(token.balanceOf(address(escrow)), 100 ether);
+    }
+
+    function test_OwnerSkipsDeposit() public {
+        address[] memory owners = new address[](3);
+        owners[0] = user1;
+        owners[1] = user2;
+        owners[2] = user3;
+
+        // Owner (address(this)) calls create
+        // Assuming setUp minted tokens but we don't approve specific amount for this call
+        // because owner shouldn't need transferFrom
+
+        uint256 initialBalance = token.balanceOf(address(escrow));
+
+        _createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
+
+        // Assert NO deposit was transferred
+        // Note: setUp may have minted initial tokens to escrow or not, depending on other tests
+        // But for this specific call, balance shouldn't increase by 100
+        assertEq(token.balanceOf(address(escrow)), initialBalance);
     }
 
     function test_StakeVoteSuccess() public {
@@ -159,7 +200,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 3 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 100 ether);
         vm.startPrank(user1);
@@ -179,7 +220,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp + 1 days);
         uint64 endTime = uint64(block.timestamp + 2 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.prank(user1);
@@ -198,7 +239,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.expectRevert();
@@ -214,7 +255,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 2 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         vm.expectRevert("TopicBountyEscrow: voting not ended");
         escrow.finalizeVoting(proposalId);
@@ -228,7 +269,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 100 ether);
         token.mint(user2, 100 ether);
@@ -260,7 +301,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.startPrank(user1);
@@ -283,7 +324,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 50 ether);
         vm.startPrank(user1);
@@ -313,7 +354,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         vm.expectRevert("TopicBountyEscrow: voting not finalized");
         escrow.confirmWinnerAndPay10(proposalId);
@@ -327,7 +368,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user2, 20 ether);
         vm.startPrank(user2);
@@ -351,7 +392,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user3, 30 ether);
         vm.startPrank(user3);
@@ -375,7 +416,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.startPrank(user1);
@@ -410,7 +451,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user2, 10 ether);
         vm.startPrank(user2);
@@ -435,7 +476,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user3, 10 ether);
         vm.startPrank(user3);
@@ -463,7 +504,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 50 ether);
         vm.startPrank(user1);
@@ -497,7 +538,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.startPrank(user1);
@@ -525,7 +566,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user2, 40 ether);
         vm.startPrank(user2);
@@ -556,7 +597,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user2, 10 ether);
         vm.startPrank(user2);
@@ -581,7 +622,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.startPrank(user1);
@@ -617,7 +658,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.startPrank(user1);
@@ -649,7 +690,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.startPrank(user1);
@@ -730,7 +771,7 @@ contract TopicBountyEscrowTest is Test {
         owners[2] = user3;
 
         vm.expectRevert();
-        escrow.createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
+        _createProposal(owners, uint64(block.timestamp + 1), uint64(block.timestamp + 2));
     }
 
     function test_PauseBlocksStakeVote() public {
@@ -741,7 +782,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
 
         token.mint(user1, 10 ether);
         vm.prank(user1);
@@ -765,7 +806,7 @@ contract TopicBountyEscrowTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 1 days);
-        uint256 proposalId = escrow.createProposal(owners, startTime, endTime);
+        uint256 proposalId = _createProposal(owners, startTime, endTime);
         assertEq(proposalId, 1);
     }
 

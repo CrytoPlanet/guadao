@@ -13,6 +13,9 @@ import {
 import { isAddress, parseAbi, formatUnits, parseUnits, keccak256, toHex } from 'viem';
 
 import { defaultChainId, getChainOptions } from '../../../lib/appConfig';
+import { bytes32ToCid, fetchFromIPFS } from '../../../lib/ipfs';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   statusReady,
   statusLoading,
@@ -36,8 +39,8 @@ import DisabledButton from '../../../components/DisabledButton';
 import GasEstimate from '../../../components/GasEstimate';
 
 const ESCROW_ABI = parseAbi([
-  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool)',
-  'function getTopic(uint256 proposalId,uint256 topicId) view returns (address)',
+  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool,address,bool,bool,bytes32)',
+  'function getTopic(uint256 proposalId,uint256 topicId) view returns ((address owner, bytes32 contentCid))',
   'function stakeVote(uint256 proposalId,uint256 topicId,uint256 amount)',
   'function submitDelivery(uint256 proposalId,bytes32 youtubeUrlHash,bytes32 videoIdHash,bytes32 pinnedCodeHash)',
   'function challengeDelivery(uint256 proposalId,bytes32 reasonHash,bytes32 evidenceHash)',
@@ -71,7 +74,7 @@ const STATUS_LABELS = {
 };
 
 const shortAddress = (address) =>
-  address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
+  (address && typeof address === 'string') ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
 
 const formatDateTime = (timestamp) => {
   if (!timestamp) return '-';
@@ -119,9 +122,12 @@ export default function ProposalDetailPage() {
   const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
   const [escrowAddress, setEscrowAddress] = useState('');
   const [guaTokenAddress, setGuaTokenAddress] = useState('');
+
   const [events, setEvents] = useState([]);
+  const [proposalMetadata, setProposalMetadata] = useState(null);
   const [status, setStatus] = useState(statusReady());
   const [topics, setTopics] = useState([]);
+  const [expandedTopics, setExpandedTopics] = useState({});
   const [selectedTopic, setSelectedTopic] = useState('');
   const [voteAmount, setVoteAmount] = useState('');
   const [chainTime, setChainTime] = useState(null);
@@ -311,6 +317,25 @@ export default function ProposalDetailPage() {
   const submitDeadline = readField(proposalResult.data, 'submitDeadline', 7);
   const challengeWindowEnd = readField(proposalResult.data, 'challengeWindowEnd', 14);
   const remaining90 = readField(proposalResult.data, 'remaining90', 9);
+  const metadataHash = readField(proposalResult.data, 'metadata', 23);
+
+  // Fetch Proposal Metadata
+  useEffect(() => {
+    if (!metadataHash || metadataHash === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      setProposalMetadata(null);
+      return;
+    }
+    const load = async () => {
+      try {
+        const cid = bytes32ToCid(metadataHash);
+        const data = await fetchFromIPFS(cid);
+        setProposalMetadata(data);
+      } catch (e) {
+        console.error('Failed to fetch proposal metadata', e);
+      }
+    };
+    load();
+  }, [metadataHash]);
 
   // Load topics
   useEffect(() => {
@@ -327,15 +352,30 @@ export default function ProposalDetailPage() {
       const results = [];
       for (let i = 0; i < count; i += 1) {
         try {
-          const owner = await publicClient.readContract({
+          const topicData = await publicClient.readContract({
             address: escrowAddress,
             abi: ESCROW_ABI,
             functionName: 'getTopic',
             args: [proposalIdValue, BigInt(i)],
           });
-          results.push({ id: i, owner });
+
+          let meta = null;
+          if (topicData.contentCid && topicData.contentCid !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            try {
+              const cid = bytes32ToCid(topicData.contentCid);
+              meta = await fetchFromIPFS(cid);
+            } catch (e) { /* ignore */ }
+          }
+
+          results.push({
+            id: i,
+            owner: topicData.owner,
+            contentCid: topicData.contentCid,
+            title: meta?.title,
+            description: meta?.description
+          });
         } catch (error) {
-          results.push({ id: i, owner: null });
+          results.push({ id: i, owner: null, contentCid: null });
         }
       }
       setTopics(results);
@@ -619,6 +659,13 @@ export default function ProposalDetailPage() {
   const actionLocked = !isConnected || chainMismatch;
   const isAnyActionRunning = isWriting || action !== '';
 
+  const toggleTopic = (id) => {
+    setExpandedTopics((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
   return (
     <main className="layout">
       <ConfirmModal
@@ -633,8 +680,7 @@ export default function ProposalDetailPage() {
         <div>
           <p className="eyebrow">{t('proposal.detail.eyebrow')}</p>
           <h1>
-            {t('proposal.detail.title')}
-            {proposalIdValue?.toString() || '-'}
+            {proposalMetadata?.title ? proposalMetadata.title : `${t('proposal.detail.title')}${proposalIdValue?.toString() || '-'}`}
           </h1>
           <p className="lede">{t('proposal.detail.lede')}</p>
           <div className="hero-actions">
@@ -663,12 +709,24 @@ export default function ProposalDetailPage() {
           <div className="status-row">
             <span>{t('escrow.summary.winner')}</span>
             <span className="inline-group">
-              {shortAddress(winnerTopicResult.data)}
-              <CopyButton value={winnerTopicResult.data} />
+              {shortAddress(readField(winnerTopicResult.data, 'owner', 0))}
+              <CopyButton value={readField(winnerTopicResult.data, 'owner', 0)} />
             </span>
           </div>
         </div>
       </section>
+
+      {/* Proposal Description */}
+      {proposalMetadata?.description && (
+        <section className="panel">
+          <h2>{t('proposals.create.description')}</h2>
+          <div className="markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {proposalMetadata.description}
+            </ReactMarkdown>
+          </div>
+        </section>
+      )}
 
       {/* Timeline */}
       <section className="panel">
@@ -757,9 +815,51 @@ export default function ProposalDetailPage() {
           {/* Topic Selection */}
           <div className="status-grid">
             {topics.map((topic) => (
-              <label key={topic.id} className="status-row">
-                <span>
-                  {t('voting.topic.select')} #{topic.id}
+              <label key={topic.id} className="status-row" style={{ alignItems: 'flex-start' }}>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 'bold' }}>
+                      {topic.title ? topic.title : `${t('voting.topic.select')} #${topic.id}`}
+                    </span>
+                    {topic.description && (
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto', minHeight: 'unset' }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          toggleTopic(topic.id);
+                        }}
+                      >
+                        {expandedTopics[topic.id] ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+                      </button>
+                    )}
+                  </div>
+
+                  {expandedTopics[topic.id] && topic.description && (
+                    <div className="markdown-body" style={{
+                      fontSize: '0.9em',
+                      marginTop: '4px',
+                      padding: '12px',
+                      background: 'rgba(0,0,0,0.03)',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(0,0,0,0.05)'
+                    }}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {topic.description}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+
+                  {(!topic.title && !topic.description) && (
+                    <span>{t('voting.topic.select')} #{topic.id}</span>
+                  )}
+                  {topic.contentCid && (
+                    <span className="muted" style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      Hash: {shortAddress(topic.contentCid)}
+                      <CopyButton value={topic.contentCid} />
+                    </span>
+                  )}
                 </span>
                 <span className="inline-group">
                   {shortAddress(topic.owner)}

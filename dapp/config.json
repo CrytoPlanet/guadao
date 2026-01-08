@@ -7,6 +7,7 @@
     "8453": {
       "label": "Base Mainnet",
       "airdropAddress": "",
+      "universalAirdropAddress": "",
       "escrowAddress": "",
       "guaTokenAddress": "",
       "proofsUrl": "/merkle/proofs.json",
@@ -15,17 +16,19 @@
     },
     "31337": {
       "label": "Local Anvil",
-      "airdropAddress": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
-      "escrowAddress": "0x0165878a594ca255338adfa4d48449f69242eb8f",
-      "guaTokenAddress": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
+      "airdropAddress": "0x4a679253410272dd5232b3ff7cf5dbb88f295319",
+      "universalAirdropAddress": "0xc5a5c42992decbae36851359345fe25997f5c42d",
+      "escrowAddress": "0x9e545e3c0baab3e08cdfd552c960a1050f373042",
+      "guaTokenAddress": "0x322813fd9a801c5507c9de605d63cea4f2ce6c44",
       "proofsUrl": "/merkle/proofs.json",
       "rpcUrl": "http://localhost:8545",
       "explorerUrl": "",
-      "startBlock": 0
+      "startBlock": 13
     },
     "84532": {
       "label": "Base Sepolia",
       "airdropAddress": "0x9b40014cc0b2ef7861ef318a242f0e9051caa979",
+      "universalAirdropAddress": "0x86aD4a993b7aad7295B0032F13F2F68294Ac24F7",
       "escrowAddress": "0x09ffd59910d17aa85598f362fcbec05b35978319",
       "guaTokenAddress": "0x13ce0501266fdfd25fda8befe8a92815d1a5af08",
       "proofsUrl": "/merkle/proofs.json",

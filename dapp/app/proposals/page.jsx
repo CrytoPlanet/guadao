@@ -12,6 +12,7 @@ import { isAddress, parseAbi, createPublicClient, http } from 'viem';
 import { anvil } from 'viem/chains';
 
 import { defaultChainId, getChainOptions } from '../../lib/appConfig';
+import { bytes32ToCid, fetchFromIPFS } from '../../lib/ipfs';
 import {
   statusReady,
   statusLoading,
@@ -27,8 +28,16 @@ import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
 
 const ESCROW_EVENTS_ABI = parseAbi([
-  'event ProposalCreated(uint256 indexed proposalId,uint64 startTime,uint64 endTime,uint256[] topicIds,address[] topicOwners)',
-  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool)',
+  'event ProposalCreated(uint256 indexed proposalId,uint64 startTime,uint64 endTime,uint256[] topicIds,address[] topicOwners,bytes32[] contentCids,bytes32 metadata,address indexed creator)',
+  /* 
+   * getProposal returns:
+   * 0: startTime, 1: endTime, 2: topicCount, 3: status, 4: winnerTopicId, 5: totalPool
+   * 6: finalized, 7: submitDeadline, 8: paid10, 9: remaining90, 10: confirmed
+   * 11: youtubeUrlHash, 12: videoIdHash, 13: pinnedCodeHash, 14: challengeWindowEnd
+   * 15: deliverySubmitted, 16: challenger, 17: reasonHash, 18: evidenceHash
+   * 19: disputeResolved, 20: creator, 21: depositRefunded, 22: depositConfiscated, 23: metadata
+   */
+  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool,address,bool,bool,bytes32)',
 ]);
 
 const STATUS_LABELS = {
@@ -120,6 +129,8 @@ export default function ProposalsPage() {
           logs.map(async (log) => {
             const pid = log.args?.proposalId;
             let currentStatus = 0;
+            let title = '';
+
             try {
               const data = await client.readContract({
                 address: escrowAddress,
@@ -128,12 +139,31 @@ export default function ProposalsPage() {
                 args: [pid],
               });
               // Proposal struct: status is at index 3 (uint8)
-              // struct Members: 
-              // 0: startTime, 1: endTime, 2: topicCount, 3: status, ...
+              // metadata is at index 23 (bytes32)
               currentStatus = Number(data[3]);
+              const metadataHash = data[23];
+
+              // Try to fetch title from IPFS if hash exists
+              if (metadataHash && metadataHash !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                try {
+                  // We don't block the UI for IPFS fetch, but here we do it naively for simplicity
+                  // In a real optimized app, this would be a separate hook/cache
+                  const cid = bytes32ToCid(metadataHash);
+                  const content = await fetchFromIPFS(cid);
+                  if (content && content.title) {
+                    title = content.title;
+                  }
+                } catch (e) {
+                  // Ignore IPFS fetch errors
+                }
+              }
             } catch (err) {
               console.error('Failed to fetch proposal details', pid, err);
             }
+
+            // DEBUG LOGS
+            console.log(`[Proposal ${pid}] Metadata Hash:`, log.args?.metadata || 'N/A');
+            console.log(`[Proposal ${pid}] Fetched Title:`, title);
 
             return {
               id: pid?.toString() ?? '-1',
@@ -142,6 +172,7 @@ export default function ProposalsPage() {
               blockNumber: log.blockNumber,
               txHash: log.transactionHash,
               status: currentStatus,
+              title: title, // Provide fetched title
             };
           })
         );
@@ -191,7 +222,7 @@ export default function ProposalsPage() {
     >
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <strong>{t('proposal.detail.title')}{proposal.id}</strong>
+          <strong>{proposal.title ? proposal.title : `${t('proposal.detail.title')}${proposal.id}`}</strong>
           <span className="badge">{STATUS_LABELS[lang]?.[proposal.status] || '-'}</span>
         </div>
         <div className="muted">{t('proposals.card.start')}: {formatDateTime(proposal.startTime)}</div>
@@ -227,6 +258,11 @@ export default function ProposalsPage() {
             <span>{activeProposals.length + historyProposals.length}</span>
           </div>
           <p className="hint">{t('proposals.lede')}</p>
+          <div style={{ marginTop: '1rem' }}>
+            <Link href="/proposals/create" className="btn primary">
+              {t('proposals.create')}
+            </Link>
+          </div>
         </div>
       </section>
 

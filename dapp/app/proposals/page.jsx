@@ -9,7 +9,7 @@ import {
   usePublicClient,
 } from 'wagmi';
 import { isAddress, parseAbi, createPublicClient, http } from 'viem';
-import { anvil } from 'viem/chains';
+import { baseSepolia, base, anvil } from 'viem/chains';
 
 import { defaultChainId, getChainOptions } from '../../lib/appConfig';
 import { bytes32ToCid, fetchFromIPFS } from '../../lib/ipfs';
@@ -110,7 +110,10 @@ export default function ProposalsPage() {
       let client = wagmiPublicClient;
       if (!client && activeChainConfig?.rpcUrl) {
         try {
-          client = createPublicClient({ chain: anvil, transport: http(activeChainConfig.rpcUrl) });
+          // Select correct chain based on targetChainId
+          const chainById = { [base.id]: base, [baseSepolia.id]: baseSepolia, [anvil.id]: anvil };
+          const chain = chainById[targetChainId] || baseSepolia;
+          client = createPublicClient({ chain, transport: http(activeChainConfig.rpcUrl) });
         } catch (e) {
           console.error('Failed to create fallback client:', e);
           setStatus(statusNoRpc());
@@ -159,7 +162,9 @@ export default function ProposalsPage() {
     // Get Client (Re-create logic briefly or assume valid from previous step, but safer to get again)
     let client = wagmiPublicClient;
     if (!client && activeChainConfig?.rpcUrl) {
-      client = createPublicClient({ chain: anvil, transport: http(activeChainConfig.rpcUrl) });
+      const chainById = { [base.id]: base, [baseSepolia.id]: baseSepolia, [anvil.id]: anvil };
+      const chain = chainById[targetChainId] || baseSepolia;
+      client = createPublicClient({ chain, transport: http(activeChainConfig.rpcUrl) });
     }
     if (!client) return;
 

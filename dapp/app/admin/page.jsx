@@ -165,23 +165,43 @@ export default function AdminPage() {
     }
   };
 
-  const handlePause = () =>
+  const handlePause = () => {
+    if (!isAddress(escrowAddress)) {
+      setStatus(statusInvalidAddress());
+      return;
+    }
+    if (chainMismatch) {
+      setStatus(statusNetworkMismatch());
+      return;
+    }
     runAction('pause', () =>
       writeContractAsync({
         address: escrowAddress,
         abi: ESCROW_ABI,
         functionName: 'pause',
+        chainId: Number(targetChainId),
       })
     );
+  };
 
-  const handleUnpause = () =>
+  const handleUnpause = () => {
+    if (!isAddress(escrowAddress)) {
+      setStatus(statusInvalidAddress());
+      return;
+    }
+    if (chainMismatch) {
+      setStatus(statusNetworkMismatch());
+      return;
+    }
     runAction('unpause', () =>
       writeContractAsync({
         address: escrowAddress,
         abi: ESCROW_ABI,
         functionName: 'unpause',
+        chainId: Number(targetChainId),
       })
     );
+  };
 
 
 

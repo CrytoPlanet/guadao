@@ -127,11 +127,36 @@ export default function ProposalsPage() {
 
       try {
         setStatus(statusLoading());
-        const logs = await client.getLogs({
-          address: escrowAddress,
-          event: ESCROW_EVENTS_ABI[0],
-          fromBlock: activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n,
-        });
+
+        // Fetch current block number to handle range
+        const currentBlock = await client.getBlockNumber();
+        const startBlock = activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n;
+        const CHUNK_SIZE = 50000n; // Safety margin under 100k limit
+
+        const chunks = [];
+        for (let i = startBlock; i <= currentBlock; i += CHUNK_SIZE) {
+          const toBlock = i + CHUNK_SIZE - 1n < currentBlock ? i + CHUNK_SIZE - 1n : currentBlock;
+          chunks.push({ from: i, to: toBlock });
+        }
+
+        // Fetch chunks in parallel (limit concurrency if needed, but 3-4 chunks usually fine)
+        const allLogsResults = await Promise.all(
+          chunks.map(async ({ from, to }) => {
+            try {
+              return await client.getLogs({
+                address: escrowAddress,
+                event: ESCROW_EVENTS_ABI[0],
+                fromBlock: from,
+                toBlock: to,
+              });
+            } catch (e) {
+              console.warn(`Failed to fetch logs for range ${from}-${to}`, e);
+              return [];
+            }
+          })
+        );
+
+        const logs = allLogsResults.flat();
 
         // Sort desc by proposalId (assuming generic sorting by ID/Block is sufficient)
         // We use proposalId from args if available, or blockNumber as proxy

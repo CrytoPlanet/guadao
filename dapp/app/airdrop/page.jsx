@@ -636,7 +636,7 @@ export default function AirdropPage() {
           className={`mode-toggle ${airdropType === 'merkle' ? 'active' : ''}`}
           type="button"
           onClick={() => setAirdropType('merkle')}
-          style={airdropType === 'merkle' ? { background: 'var(--accent)', color: 'var(--bg)', flex: 1, justifyContent: 'center' } : { flex: 1, justifyContent: 'center' }}
+          style={{ flex: 1, justifyContent: 'center' }}
         >
           {t('airdrop.type.merkle')}
         </button>
@@ -644,7 +644,7 @@ export default function AirdropPage() {
           className={`mode-toggle ${airdropType === 'universal' ? 'active' : ''}`}
           type="button"
           onClick={() => setAirdropType('universal')}
-          style={airdropType === 'universal' ? { background: 'var(--accent)', color: 'var(--bg)', flex: 1, justifyContent: 'center' } : { flex: 1, justifyContent: 'center' }}
+          style={{ flex: 1, justifyContent: 'center' }}
         >
           {t('airdrop.type.universal')}
         </button>

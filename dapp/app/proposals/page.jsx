@@ -236,6 +236,22 @@ export default function ProposalsPage() {
     }
   }, [allLogs, loadedCount, isLoadingMore]);
 
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Filter Logic
+  const filterProposals = (list) => {
+    if (!searchQuery) return list;
+    const lowerQuery = searchQuery.toLowerCase();
+    return list.filter(p =>
+      p.title.toLowerCase().includes(lowerQuery) ||
+      p.id.toString() === lowerQuery
+    );
+  };
+
+  const filteredActive = filterProposals(activeProposals);
+  const filteredHistory = filterProposals(historyProposals);
+
   // Handler for manual "Load More"
   const handleLoadMore = () => {
     if (loadedCount >= allLogs.length || isLoadingMore) return;
@@ -351,15 +367,37 @@ export default function ProposalsPage() {
         </section>
       )}
 
+      {/* Search Bar */}
+      <div className="search-bar">
+        <span className="icon">🔍</span>
+        <input
+          type="text"
+          placeholder={t('proposals.search.placeholder') || "Search by Title or ID..."}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+        {searchQuery && (
+          <button
+            className="clear-btn"
+            onClick={() => setSearchQuery('')}
+            title="Clear"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
       {/* Active Proposals */}
       <section className="panel">
         <h2>{t('proposals.list.active')}</h2>
         <StatusNotice status={status} />
-        {activeProposals.length === 0 && status?.kind === 'loaded' ? (
+        {filteredActive.length === 0 && searchQuery ? (
+          <p className="muted">{t('proposals.search.no_results')}</p>
+        ) : filteredActive.length === 0 && status?.kind === 'loaded' ? (
           <p className="muted">{t('proposals.list.empty')}</p>
         ) : (
           <div className="form-grid">
-            {activeProposals.map(renderProposalCard)}
+            {filteredActive.map(renderProposalCard)}
           </div>
         )}
       </section>
@@ -368,9 +406,15 @@ export default function ProposalsPage() {
       {historyProposals.length > 0 && (
         <section className="panel">
           <h2>{t('proposals.list.history')}</h2>
-          <div className="form-grid">
-            {historyProposals.map(renderProposalCard)}
-          </div>
+          {filteredHistory.length === 0 && searchQuery ? (
+            <p className="muted">{t('proposals.search.no_results')}</p>
+          ) : filteredHistory.length === 0 ? (
+            <p className="muted">{t('proposals.list.empty')}</p>
+          ) : (
+            <div className="form-grid">
+              {filteredHistory.map(renderProposalCard)}
+            </div>
+          )}
         </section>
       )}
 

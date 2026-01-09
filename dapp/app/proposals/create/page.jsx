@@ -14,7 +14,7 @@ import { isAddress, parseAbi, parseEther } from 'viem';
 import { uploadToIPFS, cidToBytes32, createTopicContent } from '../../../lib/ipfs';
 
 import MarkdownRenderer from '../../components/MarkdownRenderer';
-import TextareaAutosize from 'react-textarea-autosize';
+import MarkdownEditor from '../../components/MarkdownEditor';
 
 import { defaultChainId, getChainOptions } from '../../../lib/appConfig';
 import {
@@ -28,6 +28,7 @@ import {
     statusTxConfirmed,
 } from '../../../lib/status';
 import { useI18n } from '../../components/LanguageProvider';
+import { useTheme } from '../../components/ThemeProvider';
 import StatusNotice from '../../components/StatusNotice';
 import DateTimePicker from '../../components/DateTimePicker';
 import ExplorerLink from '../../components/ExplorerLink';
@@ -45,6 +46,7 @@ const TOKEN_ABI = parseAbi([
 
 export default function CreateProposalPage() {
     const { t } = useI18n();
+    const { mounted } = useTheme();
     const router = useRouter();
     const chainOptions = useMemo(getChainOptions, []);
     const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
@@ -333,7 +335,7 @@ export default function CreateProposalPage() {
                     </div>
                     <div className="status-row">
                         <span>{t('airdrop.status.wallet')}</span>
-                        <span>{isConnected ? t('airdrop.status.connected') : t('airdrop.status.disconnected')}</span>
+                        <span>{mounted ? (isConnected ? t('airdrop.status.connected') : t('airdrop.status.disconnected')) : '-'}</span>
                     </div>
                 </div>
             </section>
@@ -384,7 +386,7 @@ export default function CreateProposalPage() {
                             maxLength={100}
                         />
                     </label>
-                    <label className="field full">
+                    <div className="field full">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                             <span>{t('proposals.create.description')}</span>
                             <div className="inline-group" style={{ gap: '8px' }}>
@@ -400,41 +402,98 @@ export default function CreateProposalPage() {
                                 </span>
                             </div>
                         </div>
-                        {previewProposal ? (
+
+                        {/* Templates */}
+                        <div className="hero-actions" style={{ marginBottom: '12px', marginTop: '-4px' }}>
+                            <span style={{ fontSize: '0.85rem', color: 'var(--muted)', alignSelf: 'center' }}>
+                                {t('proposals.create.templates')}:
+                            </span>
+                            <button
+                                className="btn ghost"
+                                style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                                onClick={() => setProposalDescription(
+                                    `# Abstract
+Brief summary of the proposal.
+
+# Motivation
+Why is this proposal necessary?
+
+# Specification
+Technical details or specific actions.`
+                                )}
+                            >
+                                {t('proposals.create.template.general')}
+                            </button>
+                            <button
+                                className="btn ghost"
+                                style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                                onClick={() => setProposalDescription(
+                                    `# Project Description
+What are you building?
+
+# Use of Funds
+How will the grant be used?
+
+# Roadmap
+- [ ] Milestone 1: ...
+- [ ] Milestone 2: ...
+
+# Team
+Who is working on this?`
+                                )}
+                            >
+                                {t('proposals.create.template.grants')}
+                            </button>
+                            <button
+                                className="btn ghost"
+                                style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                                onClick={() => setProposalDescription(
+                                    `# Target
+Contract address or repository to audit.
+
+# Scope
+What specifically needs to be audited?
+
+# Budget
+Requested compensation.
+
+# Timeline
+Expected completion date.`
+                                )}
+                            >
+                                {t('proposals.create.template.audit')}
+                            </button>
+                        </div>
+                        {/* Editor and Preview (Persist both to keep scroll) */}
+                        <div style={{ display: previewProposal ? 'block' : 'none' }}>
                             <div className="markdown-preview" style={{
                                 border: '1px solid var(--border)',
                                 borderRadius: '12px',
                                 padding: '16px',
                                 minHeight: '200px',
-                                background: '#fffaf2'
+                                background: 'var(--input-bg)',
+                                backdropFilter: 'blur(12px)'
                             }}>
                                 <MarkdownRenderer>
                                     {proposalDescription || '_No description_'}
                                 </MarkdownRenderer>
                             </div>
-                        ) : (
-                            <TextareaAutosize
+                        </div>
+                        <div style={{ display: previewProposal ? 'none' : 'block' }}>
+                            <MarkdownEditor
                                 value={proposalDescription}
                                 placeholder="# Summary&#10;Describe your proposal here..."
                                 onChange={(e) => setProposalDescription(e.target.value)}
                                 minRows={10}
                                 maxLength={5000}
-                                style={{
-                                    width: '100%',
-                                    resize: 'vertical',
-                                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-                                    fontSize: '0.9rem',
-                                    lineHeight: '1.6',
-                                    padding: '16px'
-                                }}
                             />
-                        )}
-                    </label>
-                </div>
-            </section>
+                        </div>
+                    </div>
+                </div >
+            </section >
 
             {/* Topic Management with Tabs */}
-            <section className="panel">
+            < section className="panel" >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
                     <h2>{t('proposals.create.topic')} ({topics.length}/5)</h2>
                 </div>
@@ -446,7 +505,6 @@ export default function CreateProposalPage() {
                             key={index}
                             className={`mode-toggle ${activeTopicIndex === index ? 'active' : ''}`}
                             onClick={() => setActiveTopicIndex(index)}
-                            style={activeTopicIndex === index ? { background: 'var(--accent)', color: 'var(--bg)' } : {}}
                         >
                             {topics[index].title.trim() || `${t('proposals.create.topic')} ${index + 1}`}
                         </button>
@@ -494,7 +552,7 @@ export default function CreateProposalPage() {
                         </label>
                     </div>
 
-                    <label className="field full">
+                    <div className="field full">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                             <span>{t('proposals.create.topicDescription')}</span>
                             <div className="inline-group" style={{ gap: '8px' }}>
@@ -510,38 +568,33 @@ export default function CreateProposalPage() {
                                 </span>
                             </div>
                         </div>
-                        {previewTopic ? (
+                        {/* Editor and Preview (Persist both to keep scroll) */}
+                        <div style={{ display: previewTopic ? 'block' : 'none' }}>
                             <div className="markdown-preview" style={{
                                 border: '1px solid var(--border)',
                                 borderRadius: '12px',
                                 padding: '16px',
                                 minHeight: '200px',
-                                background: '#fffaf2'
+                                background: 'var(--input-bg)',
+                                backdropFilter: 'blur(12px)'
                             }}>
                                 <MarkdownRenderer>
                                     {topics[activeTopicIndex].description || '_No description_'}
                                 </MarkdownRenderer>
                             </div>
-                        ) : (
-                            <TextareaAutosize
+                        </div>
+                        <div style={{ display: previewTopic ? 'none' : 'block' }}>
+                            <MarkdownEditor
                                 value={topics[activeTopicIndex].description}
                                 placeholder="# Topic Overview&#10;Describe this topic..."
                                 onChange={(e) => updateTopic(activeTopicIndex, 'description', e.target.value)}
                                 minRows={10}
                                 maxLength={5000}
-                                style={{
-                                    width: '100%',
-                                    resize: 'vertical',
-                                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-                                    fontSize: '0.9rem',
-                                    lineHeight: '1.6',
-                                    padding: '16px'
-                                }}
                             />
-                        )}
-                    </label>
+                        </div>
+                    </div>
                 </div>
-            </section>
+            </section >
 
             <section className="panel">
                 <h2>{t('voting.window.start')} / {t('voting.window.end')}</h2>

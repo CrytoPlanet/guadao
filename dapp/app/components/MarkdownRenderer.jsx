@@ -8,19 +8,21 @@ import remarkEmoji from 'remark-emoji';
 import remarkDirective from 'remark-directive';
 import remarkWikiLink from 'remark-wiki-link';
 import rehypeKatex from 'rehype-katex';
-import rehypeHighlight from 'rehype-highlight';
 import rehypeSlug from 'rehype-slug';
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeExternalLinks from 'rehype-external-links';
+import rehypeRaw from 'rehype-raw';
 import { visit } from 'unist-util-visit';
 import { h } from 'hastscript';
 import mermaid from 'mermaid';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useI18n } from './LanguageProvider';
+import { useTheme } from './ThemeProvider';
 
 // Initialize Mermaid
 mermaid.initialize({
     startOnLoad: false,
-    theme: 'dark',
     securityLevel: 'loose',
 });
 
@@ -28,25 +30,43 @@ mermaid.initialize({
  * Mermaid Component
  */
 const Mermaid = ({ chart }) => {
-    const ref = useRef(null);
     const [svg, setSvg] = useState('');
-    const [id] = useState(`mermaid-${Math.random().toString(36).substr(2, 9)}`);
+    const idRef = useRef(`mermaid-${Math.random().toString(36).substr(2, 9)}`);
 
     useEffect(() => {
-        if (chart && ref.current) {
-            mermaid.render(id, chart).then(({ svg }) => {
+        if (!chart) return;
+
+        const renderChart = async () => {
+            try {
+                // Create a unique ID for each render to avoid conflicts
+                const id = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                const { svg } = await mermaid.render(id, chart);
                 setSvg(svg);
-            }).catch((error) => {
+
+                // Clean up the temporary element that Mermaid creates
+                const tempElement = document.getElementById(id);
+                if (tempElement) {
+                    tempElement.remove();
+                }
+            } catch (error) {
                 console.error('Mermaid render error:', error);
-                setSvg(`<div class="error">Failed to render diagram</div>`);
-            });
-        }
-    }, [chart, id]);
+                setSvg(`<div class="mermaid-error">
+                    <p>Failed to render diagram</p>
+                    <pre>${error.message}</pre>
+                </div>`);
+            }
+        };
+
+        renderChart();
+    }, [chart]);
+
+    if (!svg) {
+        return <div className="mermaid-wrapper" style={{ padding: '1rem', color: 'var(--muted)' }}>Loading diagram...</div>;
+    }
 
     return (
         <div
             className="mermaid-wrapper"
-            ref={ref}
             dangerouslySetInnerHTML={{ __html: svg }}
         />
     );
@@ -94,11 +114,22 @@ function extractTextContent(node) {
     return '';
 }
 
-function CodeBlock({ node, className, children, ...props }) {
+
+
+// Safe Pre tag to suppress hydration warnings for style mismatch
+const PreWithSuppress = ({ children, ...props }) => (
+    <pre {...props} suppressHydrationWarning>
+        {children}
+    </pre>
+);
+
+function CodeBlock({ node, inline, className, children, ...props }) {
     const { t } = useI18n();
+    const { theme, mounted } = useTheme();
     const [copied, setCopied] = useState(false);
 
-    const isInline = !className && !node?.tagName;
+    // Use the inline prop provided by ReactMarkdown, fallback to simple detection
+    const isInline = inline || (!className && !String(children).includes('\n'));
 
     const match = /language-(\w+)/.exec(className || '');
     const language = match ? match[1] : '';
@@ -106,11 +137,9 @@ function CodeBlock({ node, className, children, ...props }) {
     const codeString = extractTextContent(children).replace(/\n$/, '');
 
     // Handle Mermaid
-    if (language === 'mermaid') {
+    if (!isInline && language === 'mermaid') {
         return <Mermaid chart={codeString} />;
     }
-
-    const lines = codeString.split('\n');
 
     const handleCopy = useCallback(async () => {
         try {
@@ -123,11 +152,14 @@ function CodeBlock({ node, className, children, ...props }) {
     }, [codeString]);
 
     if (isInline) {
-        return <code className="inline-code" {...props}>{children}</code>;
+        return <code className={`inline-code ${className || ''}`} {...props}>{children}</code>;
     }
 
+    // Use light theme on server and before mount to ensure consistent hydration
+    const safeTheme = mounted ? theme : 'light';
+
     return (
-        <div className="code-block-wrapper">
+        <div className="code-block-wrapper" suppressHydrationWarning>
             <div className="code-block-header">
                 {language && <span className="code-language">{language}</span>}
                 <button
@@ -143,17 +175,30 @@ function CodeBlock({ node, className, children, ...props }) {
                     )}
                 </button>
             </div>
-            <div className="code-block-content">
-                <div className="line-numbers" aria-hidden="true">
-                    {lines.map((_, i) => (
-                        <span key={i}>{i + 1}</span>
-                    ))}
-                </div>
-                <pre className={className}>
-                    <code className={className} {...props}>
-                        {children}
-                    </code>
-                </pre>
+            <div className="code-block-content" suppressHydrationWarning>
+                <SyntaxHighlighter
+                    language={language}
+                    style={safeTheme === 'dark' ? vscDarkPlus : vs}
+                    showLineNumbers={true}
+                    PreTag={PreWithSuppress}
+                    customStyle={{
+                        margin: 0,
+                        padding: '1rem',
+                        flex: 1,
+                        background: 'transparent',
+                        fontSize: '0.9rem',
+                        lineHeight: '1.5',
+                    }}
+                    lineNumberStyle={{
+                        minWidth: '2.5em',
+                        paddingRight: '1em',
+                        color: safeTheme === 'dark' ? '#6e7781' : '#ccc',
+                        textAlign: 'right'
+                    }}
+                    wrapLines={true}
+                >
+                    {codeString}
+                </SyntaxHighlighter>
             </div>
         </div>
     );
@@ -212,7 +257,7 @@ export default function MarkdownRenderer({ children, showToc = false }) {
             {showToc && headings.length > 2 && (
                 <TableOfContents headings={headings} />
             )}
-            <div className="markdown-body">
+            <div className="markdown-body" suppressHydrationWarning>
                 <ReactMarkdown
                     remarkPlugins={[
                         remarkGfm,
@@ -237,7 +282,7 @@ export default function MarkdownRenderer({ children, showToc = false }) {
                     ]}
                     rehypePlugins={[
                         rehypeKatex,
-                        rehypeHighlight,
+                        // rehypeHighlight removed in favor of SyntaxHighlighter
                         rehypeSlug,
                         [rehypeAutolinkHeadings, {
                             behavior: 'prepend',
@@ -248,9 +293,12 @@ export default function MarkdownRenderer({ children, showToc = false }) {
                             target: '_blank',
                             rel: ['noopener', 'noreferrer']
                         }],
+                        rehypeRaw
                     ]}
                     components={{
+                        pre: ({ children }) => <>{children}</>,
                         code: MemoizedCodeBlock,
+                        p: ({ children }) => <div className="md-paragraph" style={{ marginBottom: '1rem' }}>{children}</div>
                     }}
                 >
                     {children}

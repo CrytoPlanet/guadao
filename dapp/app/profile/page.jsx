@@ -12,6 +12,7 @@ import { defaultChainId, getChainOptions } from '../../lib/appConfig';
 import { bytes32ToCid, fetchFromIPFS } from '../../lib/ipfs';
 import { statusLoading, statusLoaded, statusEmpty, statusError } from '../../lib/status';
 import { useI18n } from '../components/LanguageProvider';
+import { useTheme } from '../components/ThemeProvider';
 import CopyButton from '../components/CopyButton';
 import StatusNotice from '../components/StatusNotice';
 import TokenBalance from '../../components/TokenBalance';
@@ -36,6 +37,7 @@ const shortAddress = (address) =>
 
 export default function ProfilePage() {
     const { t, lang } = useI18n();
+    const { mounted } = useTheme();
     const { address, isConnected } = useAccount();
     const chainId = useChainId();
     const publicClient = usePublicClient();
@@ -390,7 +392,7 @@ export default function ProfilePage() {
                 <div className="status-card">
                     <div className="status-row">
                         <span>{t('airdrop.status.wallet')}</span>
-                        <span>{isConnected ? t('airdrop.status.connected') : t('airdrop.status.disconnected')}</span>
+                        <span>{mounted ? (isConnected ? t('airdrop.status.connected') : t('airdrop.status.disconnected')) : '-'}</span>
                     </div>
                     <div className="status-row">
                         <span>{t('airdrop.status.address')}</span>
@@ -399,13 +401,59 @@ export default function ProfilePage() {
                             <CopyButton value={address} />
                         </span>
                     </div>
-                    <div className="status-row">
-                        <span>{t('profile.balance')}</span>
-                        <span><TokenBalance /></span>
-                    </div>
+
                     <div className="status-row">
                         <span>{t('airdrop.status.network')}</span>
                         <span>{chainId || '-'}</span>
+                    </div>
+                </div>
+            </section>
+
+            {/* Stats Grid */}
+            <section className="panel" style={{ background: 'transparent', border: 'none', padding: '0', boxShadow: 'none', marginBottom: '20px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px' }}>
+                    <div className="status-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                            {t('profile.stats.votes')}
+                        </span>
+                        <span style={{ fontSize: '1.8rem', fontFamily: 'var(--font-title)', fontWeight: '600', color: 'var(--accent)' }}>
+                            {votes.length}
+                        </span>
+                    </div>
+                    <div className="status-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                            {t('profile.stats.proposals')}
+                        </span>
+                        <span style={{ fontSize: '1.8rem', fontFamily: 'var(--font-title)', fontWeight: '600', color: 'var(--accent)' }}>
+                            {createdProposals.length}
+                        </span>
+                    </div>
+                    <div className="status-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                            {t('profile.stats.airdrops')}
+                        </span>
+                        <span style={{ fontSize: '1.8rem', fontFamily: 'var(--font-title)', fontWeight: '600', color: 'var(--accent)' }}>
+                            {airdrops.length}
+                        </span>
+                    </div>
+                    <div className="status-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                            {t('profile.stats.airdropAmount')}
+                        </span>
+                        <span style={{ fontSize: '1.8rem', fontFamily: 'var(--font-title)', fontWeight: '600', color: 'var(--accent)' }}>
+                            {airdrops.reduce((acc, curr) => {
+                                const val = parseFloat(curr.amount);
+                                return acc + (isNaN(val) ? 0 : val);
+                            }, 0).toLocaleString()}
+                        </span>
+                    </div>
+                    <div className="status-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                            {t('profile.balance')}
+                        </span>
+                        <span style={{ fontSize: '1.8rem', fontFamily: 'var(--font-title)', fontWeight: '600', color: 'var(--accent)' }}>
+                            <TokenBalance />
+                        </span>
                     </div>
                 </div>
             </section>
@@ -417,7 +465,6 @@ export default function ProfilePage() {
                             key={tab.id}
                             className={`mode-toggle ${activeTab === tab.id ? 'active' : ''}`}
                             onClick={() => setActiveTab(tab.id)}
-                            style={activeTab === tab.id ? { background: 'var(--accent)', color: 'var(--bg)' } : {}}
                         >
                             {tab.label}
                         </button>

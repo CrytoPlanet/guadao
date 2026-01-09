@@ -36,6 +36,7 @@ import ProposalTimeline from '../../../components/ProposalTimeline';
 import ConfirmModal from '../../../components/ConfirmModal';
 import DisabledButton from '../../../components/DisabledButton';
 import GasEstimate from '../../../components/GasEstimate';
+import ScrollProgress from '../../components/ScrollProgress';
 
 const ESCROW_ABI = parseAbi([
   'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool,address,bool,bool,bytes32)',
@@ -1186,6 +1187,7 @@ export default function ProposalDetailPage() {
           </div>
         )}
       </section>
+      <ScrollProgress />
     </main>
   );
 }

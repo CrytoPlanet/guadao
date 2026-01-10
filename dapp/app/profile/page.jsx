@@ -35,6 +35,36 @@ const ESCROW_EVENTS_ABI = parseAbi([
 const shortAddress = (address) =>
     address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
 
+// Helper function to fetch logs in chunks to avoid RPC block range limits
+const fetchLogsChunked = async (publicClient, params, startBlock) => {
+    const currentBlock = await publicClient.getBlockNumber();
+    const fromBlock = startBlock ? BigInt(startBlock) : 0n;
+    const CHUNK_SIZE = 50000n;
+
+    const chunks = [];
+    for (let i = fromBlock; i <= currentBlock; i += CHUNK_SIZE) {
+        const toBlock = i + CHUNK_SIZE - 1n < currentBlock ? i + CHUNK_SIZE - 1n : currentBlock;
+        chunks.push({ from: i, to: toBlock });
+    }
+
+    const allResults = await Promise.all(
+        chunks.map(async ({ from, to }) => {
+            try {
+                return await publicClient.getLogs({
+                    ...params,
+                    fromBlock: from,
+                    toBlock: to,
+                });
+            } catch (e) {
+                console.warn(`Failed to fetch logs for range ${from}-${to}`, e);
+                return [];
+            }
+        })
+    );
+
+    return allResults.flat();
+};
+
 export default function ProfilePage() {
     const { t, lang } = useI18n();
     const { mounted } = useTheme();
@@ -91,29 +121,29 @@ export default function ProfilePage() {
                 // Fetch Merkle Airdrop Logs
                 let merkleLogs = [];
                 if (isAddress(airdropAddress)) {
-                    merkleLogs = await publicClient.getLogs({
-                        address: airdropAddress,
-                        event: parseAbi(['event Claimed(address indexed to, uint256 amount)'])[0],
-                        args: { to: address },
-                        fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
-                    });
+                    merkleLogs = await fetchLogsChunked(
+                        publicClient,
+                        {
+                            address: airdropAddress,
+                            event: parseAbi(['event Claimed(address indexed to, uint256 amount)'])[0],
+                            args: { to: address },
+                        },
+                        chainConfig?.startBlock
+                    );
                 }
 
                 // Fetch Universal Airdrop Logs
                 let universalLogs = [];
                 if (isAddress(universalAirdropAddress)) {
-                    universalLogs = await publicClient.getLogs({
-                        address: universalAirdropAddress,
-                        event: parseAbi(['event Claimed(address indexed user, uint256 amount)'])[0],
-                        args: { user: address }, // Note: event param name is 'user' in Universal, 'to' in Merkle? Let's check ABI. 
-                        // Actually, I should check the event signature.
-                        // Universal: event Claimed(address indexed user, uint256 amount);
-                        // Merkle: event Claimed(address indexed to, uint256 amount);
-                        // ABI encoding is the same for indexed address + uint256. 
-                        // But I need to allow for different parameter names in parsing if I use `parseAbi`.
-                        // However, strictly speaking, the signature hash is `Claimed(address,uint256)`.
-                        fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
-                    });
+                    universalLogs = await fetchLogsChunked(
+                        publicClient,
+                        {
+                            address: universalAirdropAddress,
+                            event: parseAbi(['event Claimed(address indexed user, uint256 amount)'])[0],
+                            args: { user: address },
+                        },
+                        chainConfig?.startBlock
+                    );
                 }
 
                 const allLogs = [...merkleLogs, ...universalLogs];
@@ -218,12 +248,15 @@ export default function ProfilePage() {
             }
             try {
                 setCreatedProposalsStatus(statusLoading());
-                const logs = await publicClient.getLogs({
-                    address: escrowAddress,
-                    event: ESCROW_EVENTS_ABI[2], // ProposalCreated
-                    args: { creator: address },
-                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
-                });
+                const logs = await fetchLogsChunked(
+                    publicClient,
+                    {
+                        address: escrowAddress,
+                        event: ESCROW_EVENTS_ABI[2], // ProposalCreated
+                        args: { creator: address },
+                    },
+                    chainConfig?.startBlock
+                );
 
                 const mapped = logs.map(log => ({
                     proposalId: log.args.proposalId.toString(),
@@ -261,12 +294,15 @@ export default function ProfilePage() {
 
             try {
                 setVotesStatus(statusLoading());
-                const logs = await publicClient.getLogs({
-                    address: escrowAddress,
-                    event: ESCROW_EVENTS_ABI[0], // Voted event
-                    args: { voter: address },
-                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
-                });
+                const logs = await fetchLogsChunked(
+                    publicClient,
+                    {
+                        address: escrowAddress,
+                        event: ESCROW_EVENTS_ABI[0], // Voted event
+                        args: { voter: address },
+                    },
+                    chainConfig?.startBlock
+                );
 
                 const mapped = logs.map((log) => ({
                     proposalId: log.args?.proposalId?.toString() ?? '-',
@@ -301,12 +337,15 @@ export default function ProfilePage() {
 
             try {
                 setChallengesStatus(statusLoading());
-                const logs = await publicClient.getLogs({
-                    address: escrowAddress,
-                    event: ESCROW_EVENTS_ABI[1], // DeliveryChallenged event
-                    args: { challenger: address },
-                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
-                });
+                const logs = await fetchLogsChunked(
+                    publicClient,
+                    {
+                        address: escrowAddress,
+                        event: ESCROW_EVENTS_ABI[1], // DeliveryChallenged event
+                        args: { challenger: address },
+                    },
+                    chainConfig?.startBlock
+                );
 
                 const mapped = logs.map((log) => ({
                     proposalId: log.args?.proposalId?.toString() ?? '-',
@@ -339,11 +378,14 @@ export default function ProfilePage() {
 
             try {
                 setTopicsStatus(statusLoading());
-                const logs = await publicClient.getLogs({
-                    address: escrowAddress,
-                    event: ESCROW_EVENTS_ABI[2], // ProposalCreated event
-                    fromBlock: chainConfig?.startBlock ? BigInt(chainConfig.startBlock) : 0n,
-                });
+                const logs = await fetchLogsChunked(
+                    publicClient,
+                    {
+                        address: escrowAddress,
+                        event: ESCROW_EVENTS_ABI[2], // ProposalCreated event
+                    },
+                    chainConfig?.startBlock
+                );
 
                 const userTopics = [];
                 for (const log of logs) {

@@ -838,11 +838,17 @@ export default function ProposalDetailPage() {
           {/* Topic Selection */}
           <div className="status-grid">
             {topics.map((topic) => (
-              <label
+              <div
                 key={topic.id}
                 id={`topic-${topic.id}`}
                 className="status-row"
-                style={{ alignItems: 'flex-start', scrollMarginTop: '120px' }}
+                style={{ alignItems: 'flex-start', scrollMarginTop: '120px', cursor: 'pointer' }}
+                onClick={(e) => {
+                  // Only select topic if clicking outside the expanded content
+                  if (!e.defaultPrevented) {
+                    setSelectedTopic(String(topic.id));
+                  }
+                }}
               >
                 <span style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -856,6 +862,7 @@ export default function ProposalDetailPage() {
                         style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto', minHeight: 'unset' }}
                         onClick={(e) => {
                           e.preventDefault();
+                          e.stopPropagation();
                           toggleTopic(topic.id);
                         }}
                       >
@@ -865,14 +872,20 @@ export default function ProposalDetailPage() {
                   </div>
 
                   {expandedTopics[topic.id] && topic.description && (
-                    <div style={{
-                      fontSize: '0.9em',
-                      marginTop: '4px',
-                      padding: '12px',
-                      background: 'rgba(0,0,0,0.03)',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(0,0,0,0.05)'
-                    }}>
+                    <div
+                      style={{
+                        fontSize: '0.9em',
+                        marginTop: '4px',
+                        padding: '12px',
+                        background: 'rgba(0,0,0,0.03)',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(0,0,0,0.05)'
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                    >
                       <MarkdownRenderer>{topic.description}</MarkdownRenderer>
                     </div>
                   )}
@@ -896,9 +909,10 @@ export default function ProposalDetailPage() {
                     value={topic.id}
                     checked={String(selectedTopic) === String(topic.id)}
                     onChange={() => setSelectedTopic(String(topic.id))}
+                    onClick={(e) => e.stopPropagation()}
                   />
                 </span>
-              </label>
+              </div>
             ))}
           </div>
 

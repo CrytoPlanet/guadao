@@ -1,4 +1,6 @@
 import './globals.css';
+import 'katex/dist/katex.min.css';
+
 
 import Providers from './providers';
 import Background from './components/Background';

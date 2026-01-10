@@ -9,9 +9,10 @@ import {
   usePublicClient,
 } from 'wagmi';
 import { isAddress, parseAbi, createPublicClient, http } from 'viem';
-import { anvil } from 'viem/chains';
+import { baseSepolia, base, anvil } from 'viem/chains';
 
 import { defaultChainId, getChainOptions } from '../../lib/appConfig';
+import { bytes32ToCid, fetchFromIPFS } from '../../lib/ipfs';
 import {
   statusReady,
   statusLoading,
@@ -27,8 +28,16 @@ import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
 
 const ESCROW_EVENTS_ABI = parseAbi([
-  'event ProposalCreated(uint256 indexed proposalId,uint64 startTime,uint64 endTime,uint256[] topicIds,address[] topicOwners)',
-  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool)',
+  'event ProposalCreated(uint256 indexed proposalId,uint64 startTime,uint64 endTime,uint256[] topicIds,address[] topicOwners,bytes32[] contentCids,bytes32 metadata,address indexed creator)',
+  /* 
+   * getProposal returns:
+   * 0: startTime, 1: endTime, 2: topicCount, 3: status, 4: winnerTopicId, 5: totalPool
+   * 6: finalized, 7: submitDeadline, 8: paid10, 9: remaining90, 10: confirmed
+   * 11: youtubeUrlHash, 12: videoIdHash, 13: pinnedCodeHash, 14: challengeWindowEnd
+   * 15: deliverySubmitted, 16: challenger, 17: reasonHash, 18: evidenceHash
+   * 19: disputeResolved, 20: creator, 21: depositRefunded, 22: depositConfiscated, 23: metadata
+   */
+  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool,address,bool,bool,bytes32)',
 ]);
 
 const STATUS_LABELS = {
@@ -51,6 +60,12 @@ export default function ProposalsPage() {
   const [activeProposals, setActiveProposals] = useState([]);
   const [historyProposals, setHistoryProposals] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Pagination State
+  const [allLogs, setAllLogs] = useState([]);
+  const [loadedCount, setLoadedCount] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const BATCH_SIZE = 12;
 
   const { isConnected } = useAccount();
   const chainId = useChainId();
@@ -77,31 +92,34 @@ export default function ProposalsPage() {
     setEscrowAddress(activeChainConfig.escrowAddress || '');
   }, [activeChainConfig]);
 
-  // Auto-load proposals when address is available
+  // Reset state when chain/address changes
   useEffect(() => {
-    const loadProposals = async () => {
-      if (!isAddress(escrowAddress)) {
-        return;
-      }
-      if (chainMismatch) {
-        return;
-      }
+    setAllLogs([]);
+    setActiveProposals([]);
+    setHistoryProposals([]);
+    setLoadedCount(0);
+    setStatus(statusReady());
+  }, [targetChainId, escrowAddress]);
 
-      // 使用 wagmi client 或创建备用 client
+  // Step 1: Fetch ALL logs (lightweight)
+  useEffect(() => {
+    const fetchLogs = async () => {
+      if (!isAddress(escrowAddress) || chainMismatch) return;
+
+      // Get Client
       let client = wagmiPublicClient;
       if (!client && activeChainConfig?.rpcUrl) {
         try {
-          client = createPublicClient({
-            chain: anvil,
-            transport: http(activeChainConfig.rpcUrl),
-          });
+          // Select correct chain based on targetChainId
+          const chainById = { [base.id]: base, [baseSepolia.id]: baseSepolia, [anvil.id]: anvil };
+          const chain = chainById[targetChainId] || baseSepolia;
+          client = createPublicClient({ chain, transport: http(activeChainConfig.rpcUrl) });
         } catch (e) {
           console.error('Failed to create fallback client:', e);
           setStatus(statusNoRpc());
           return;
         }
       }
-
       if (!client) {
         setStatus(statusNoRpc());
         return;
@@ -109,70 +127,168 @@ export default function ProposalsPage() {
 
       try {
         setStatus(statusLoading());
-        const logs = await client.getLogs({
-          address: escrowAddress,
-          event: ESCROW_EVENTS_ABI[0],
-          fromBlock: activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n,
-        });
 
-        // Fetch details for each proposal to get status
-        const details = await Promise.all(
-          logs.map(async (log) => {
-            const pid = log.args?.proposalId;
-            let currentStatus = 0;
+        // Fetch current block number to handle range
+        const currentBlock = await client.getBlockNumber();
+        const startBlock = activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n;
+        const CHUNK_SIZE = 50000n; // Safety margin under 100k limit
+
+        const chunks = [];
+        for (let i = startBlock; i <= currentBlock; i += CHUNK_SIZE) {
+          const toBlock = i + CHUNK_SIZE - 1n < currentBlock ? i + CHUNK_SIZE - 1n : currentBlock;
+          chunks.push({ from: i, to: toBlock });
+        }
+
+        // Fetch chunks in parallel (limit concurrency if needed, but 3-4 chunks usually fine)
+        const allLogsResults = await Promise.all(
+          chunks.map(async ({ from, to }) => {
             try {
-              const data = await client.readContract({
+              return await client.getLogs({
                 address: escrowAddress,
-                abi: ESCROW_EVENTS_ABI, // using extended ABI
-                functionName: 'getProposal',
-                args: [pid],
+                event: ESCROW_EVENTS_ABI[0],
+                fromBlock: from,
+                toBlock: to,
               });
-              // Proposal struct: status is at index 3 (uint8)
-              // struct Members: 
-              // 0: startTime, 1: endTime, 2: topicCount, 3: status, ...
-              currentStatus = Number(data[3]);
-            } catch (err) {
-              console.error('Failed to fetch proposal details', pid, err);
+            } catch (e) {
+              console.warn(`Failed to fetch logs for range ${from}-${to}`, e);
+              return [];
             }
-
-            return {
-              id: pid?.toString() ?? '-1',
-              startTime: log.args?.startTime,
-              endTime: log.args?.endTime,
-              blockNumber: log.blockNumber,
-              txHash: log.transactionHash,
-              status: currentStatus,
-            };
           })
         );
 
-        // Sort by id descending (newest first)
-        details.sort((a, b) => Number(b.id) - Number(a.id));
+        const logs = allLogsResults.flat();
 
-        // Split: 6=Completed, 7=Denied, 8=Expired => History
-        const active = [];
-        const history = [];
-
-        details.forEach((p) => {
-          if (p.status >= 6) {
-            history.push(p);
-          } else {
-            active.push(p);
-          }
+        // Sort desc by proposalId (assuming generic sorting by ID/Block is sufficient)
+        // We use proposalId from args if available, or blockNumber as proxy
+        logs.sort((a, b) => {
+          const idA = a.args?.proposalId ? Number(a.args.proposalId) : 0;
+          const idB = b.args?.proposalId ? Number(b.args.proposalId) : 0;
+          return idB - idA;
         });
 
-        setActiveProposals(active);
-        setHistoryProposals(history);
+        setAllLogs(logs);
 
-        setStatus(details.length ? statusLoaded() : statusEmpty());
+        if (logs.length === 0) {
+          setStatus(statusEmpty());
+        }
+        // Step 2 will be triggered by useEffect depending on allLogs
       } catch (error) {
+        console.error("Log fetch error:", error);
         const message = error?.shortMessage || error?.message || 'Load failed';
         setStatus(statusError('status.error', { message }));
       }
     };
 
-    loadProposals();
+    fetchLogs();
   }, [wagmiPublicClient, escrowAddress, chainMismatch, activeChainConfig]);
+
+  // Step 2 working function: Fetch details for a batch
+  const loadNextBatch = async (logsToProcess) => {
+    // Get Client (Re-create logic briefly or assume valid from previous step, but safer to get again)
+    let client = wagmiPublicClient;
+    if (!client && activeChainConfig?.rpcUrl) {
+      const chainById = { [base.id]: base, [baseSepolia.id]: baseSepolia, [anvil.id]: anvil };
+      const chain = chainById[targetChainId] || baseSepolia;
+      client = createPublicClient({ chain, transport: http(activeChainConfig.rpcUrl) });
+    }
+    if (!client) return;
+
+    setIsLoadingMore(true);
+
+    try {
+      const details = await Promise.all(
+        logsToProcess.map(async (log) => {
+          const pid = log.args?.proposalId;
+          let currentStatus = 0;
+          let title = '';
+
+          try {
+            const data = await client.readContract({
+              address: escrowAddress,
+              abi: ESCROW_EVENTS_ABI,
+              functionName: 'getProposal',
+              args: [pid],
+            });
+            currentStatus = Number(data[3]);
+            const metadataHash = data[23];
+
+            // Optimistic IPFS fetch (non-blocking for batch, but we await for simplicity in this MVP)
+            if (metadataHash && metadataHash !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+              try {
+                const cid = bytes32ToCid(metadataHash);
+                const content = await fetchFromIPFS(cid);
+                if (content && content.title) {
+                  title = content.title;
+                }
+              } catch (e) { /* ignore */ }
+            }
+          } catch (err) {
+            console.error('Failed to fetch proposal details', pid, err);
+          }
+
+          return {
+            id: pid?.toString() ?? '-1',
+            startTime: log.args?.startTime,
+            endTime: log.args?.endTime,
+            blockNumber: log.blockNumber,
+            txHash: log.transactionHash,
+            status: currentStatus,
+            title: title,
+          };
+        })
+      );
+
+      // Distribute to Active/History
+      const newActive = [];
+      const newHistory = [];
+      details.forEach(p => {
+        if (p.status >= 6) newHistory.push(p); // 6=Completed ...
+        else newActive.push(p);
+      });
+
+      setActiveProposals(prev => [...prev, ...newActive]);
+      setHistoryProposals(prev => [...prev, ...newHistory]);
+
+      setLoadedCount(prev => prev + logsToProcess.length);
+      setStatus(statusLoaded()); // Ensure status is loaded
+    } catch (err) {
+      console.error("Batch load error", err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
+  // Step 2 Trigger: Initial Load
+  useEffect(() => {
+    if (allLogs.length > 0 && loadedCount === 0 && !isLoadingMore) {
+      const firstBatch = allLogs.slice(0, BATCH_SIZE);
+      loadNextBatch(firstBatch);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allLogs, loadedCount, isLoadingMore]);
+
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Filter Logic
+  const filterProposals = (list) => {
+    if (!searchQuery) return list;
+    const lowerQuery = searchQuery.toLowerCase();
+    return list.filter(p =>
+      p.title.toLowerCase().includes(lowerQuery) ||
+      p.id.toString() === lowerQuery
+    );
+  };
+
+  const filteredActive = filterProposals(activeProposals);
+  const filteredHistory = filterProposals(historyProposals);
+
+  // Handler for manual "Load More"
+  const handleLoadMore = () => {
+    if (loadedCount >= allLogs.length || isLoadingMore) return;
+    const nextBatch = allLogs.slice(loadedCount, loadedCount + BATCH_SIZE);
+    loadNextBatch(nextBatch);
+  };
 
   const handleSwitchChain = async () => {
     if (!targetChainId) return;
@@ -191,7 +307,7 @@ export default function ProposalsPage() {
     >
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <strong>{t('proposal.detail.title')}{proposal.id}</strong>
+          <strong>{proposal.title ? proposal.title : `${t('proposal.detail.title')}${proposal.id}`}</strong>
           <span className="badge">{STATUS_LABELS[lang]?.[proposal.status] || '-'}</span>
         </div>
         <div className="muted">{t('proposals.card.start')}: {formatDateTime(proposal.startTime)}</div>
@@ -224,9 +340,14 @@ export default function ProposalsPage() {
           </div>
           <div className="status-row">
             <span>{t('proposals.list.title')}</span>
-            <span>{activeProposals.length + historyProposals.length}</span>
+            <span>{allLogs.length > 0 ? allLogs.length : '-'}</span>
           </div>
           <p className="hint">{t('proposals.lede')}</p>
+          <div style={{ marginTop: '1rem' }}>
+            <Link href="/proposals/create" className="btn primary">
+              {t('proposals.create')}
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -277,15 +398,37 @@ export default function ProposalsPage() {
         </section>
       )}
 
+      {/* Search Bar */}
+      <div className="search-bar">
+        <span className="icon">🔍</span>
+        <input
+          type="text"
+          placeholder={t('proposals.search.placeholder') || "Search by Title or ID..."}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+        {searchQuery && (
+          <button
+            className="clear-btn"
+            onClick={() => setSearchQuery('')}
+            title="Clear"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
       {/* Active Proposals */}
       <section className="panel">
         <h2>{t('proposals.list.active')}</h2>
         <StatusNotice status={status} />
-        {activeProposals.length === 0 && status?.kind === 'loaded' ? (
+        {filteredActive.length === 0 && searchQuery ? (
+          <p className="muted">{t('proposals.search.no_results')}</p>
+        ) : filteredActive.length === 0 && status?.kind === 'loaded' ? (
           <p className="muted">{t('proposals.list.empty')}</p>
         ) : (
           <div className="form-grid">
-            {activeProposals.map(renderProposalCard)}
+            {filteredActive.map(renderProposalCard)}
           </div>
         )}
       </section>
@@ -294,10 +437,29 @@ export default function ProposalsPage() {
       {historyProposals.length > 0 && (
         <section className="panel">
           <h2>{t('proposals.list.history')}</h2>
-          <div className="form-grid">
-            {historyProposals.map(renderProposalCard)}
-          </div>
+          {filteredHistory.length === 0 && searchQuery ? (
+            <p className="muted">{t('proposals.search.no_results')}</p>
+          ) : filteredHistory.length === 0 ? (
+            <p className="muted">{t('proposals.list.empty')}</p>
+          ) : (
+            <div className="form-grid">
+              {filteredHistory.map(renderProposalCard)}
+            </div>
+          )}
         </section>
+      )}
+
+      {/* Load More Button */}
+      {allLogs.length > loadedCount && (
+        <div style={{ textAlign: 'center', margin: '2rem 0' }}>
+          <button
+            className="btn secondary"
+            onClick={handleLoadMore}
+            disabled={isLoadingMore}
+          >
+            {isLoadingMore ? t('ui.loading') || 'Loading...' : `${t('ui.loadMore') || 'Load More'} (${loadedCount}/${allLogs.length})`}
+          </button>
+        </div>
       )}
     </main>
   );

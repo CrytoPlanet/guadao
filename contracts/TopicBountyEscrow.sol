@@ -42,10 +42,15 @@ contract TopicBountyEscrow is Initializable, OwnableUpgradeable, PausableUpgrade
         bytes32 reasonHash;
         bytes32 evidenceHash;
         bool disputeResolved;
+        address creator; // Proposal creator address
+        bool depositRefunded; // Whether deposit has been refunded
+        bool depositConfiscated; // Whether deposit has been confiscated
+        bytes32 metadata; // IPFS CID hash for proposal metadata
     }
 
     struct Topic {
         address owner;
+        bytes32 contentCid; // IPFS CID hash for topic content
     }
 
     IERC20 public guaToken;
@@ -57,9 +62,25 @@ contract TopicBountyEscrow is Initializable, OwnableUpgradeable, PausableUpgrade
     mapping(uint256 => mapping(uint256 => uint256)) public topicStakeTotal;
     mapping(uint256 => mapping(uint256 => mapping(address => uint256))) public voterStakeByTopic;
 
+    /// @dev Creator deposit amount (100 GUA)
+    uint256 public constant CREATOR_DEPOSIT = 100 ether;
+
+    /// @dev Spam flag for proposals
+    mapping(uint256 => bool) public proposalSpam;
+
     event ProposalCreated(
-        uint256 indexed proposalId, uint64 startTime, uint64 endTime, uint256[] topicIds, address[] topicOwners
+        uint256 indexed proposalId,
+        uint64 startTime,
+        uint64 endTime,
+        uint256[] topicIds,
+        address[] topicOwners,
+        bytes32[] contentCids,
+        bytes32 metadata,
+        address indexed creator
     );
+    event DepositRefunded(uint256 indexed proposalId, address indexed creator, uint256 amount);
+    event DepositConfiscated(uint256 indexed proposalId, address indexed creator, uint256 amount);
+    event ProposalMarkedSpam(uint256 indexed proposalId);
     event Voted(address indexed voter, uint256 indexed proposalId, uint256 indexed topicId, uint256 amount);
     event VotingFinalized(uint256 indexed proposalId, uint256 winnerTopicId, uint256 totalPool);
     event WinnerConfirmed(
@@ -121,15 +142,29 @@ contract TopicBountyEscrow is Initializable, OwnableUpgradeable, PausableUpgrade
         emit TreasuryUpdated(oldTreasury, _newTreasury);
     }
 
-    function createProposal(address[] calldata topicOwners, uint64 startTime, uint64 endTime)
-        external
-        onlyOwner
-        whenNotPaused
-        returns (uint256 proposalId)
-    {
+    /**
+     * @dev 创建提案（任何用户可调用，需支付押金）
+     * @param topicOwners Topic 所有者地址数组
+     * @param contentCids Topic 内容的 IPFS CID 哈希数组
+     * @param startTime 投票开始时间
+     * @param endTime 投票结束时间
+     */
+    function createProposal(
+        address[] calldata topicOwners,
+        bytes32[] calldata contentCids,
+        bytes32 metadata,
+        uint64 startTime,
+        uint64 endTime
+    ) external whenNotPaused nonReentrant returns (uint256 proposalId) {
         uint256 count = topicOwners.length;
-        require(count >= 3 && count <= 5, "TopicBountyEscrow: invalid topic count");
+        require(count >= 1 && count <= 5, "TopicBountyEscrow: invalid topic count");
+        require(contentCids.length == count, "TopicBountyEscrow: cid count mismatch");
         require(endTime > startTime, "TopicBountyEscrow: invalid window");
+
+        // Transfer deposit from creator (unless owner)
+        if (msg.sender != owner()) {
+            guaToken.transferFrom(msg.sender, address(this), CREATOR_DEPOSIT);
+        }
 
         proposalId = ++proposalCount;
         proposals[proposalId] = Proposal({
@@ -152,18 +187,71 @@ contract TopicBountyEscrow is Initializable, OwnableUpgradeable, PausableUpgrade
             challenger: address(0),
             reasonHash: bytes32(0),
             evidenceHash: bytes32(0),
-            disputeResolved: false
+            disputeResolved: false,
+            creator: msg.sender,
+            depositRefunded: false,
+            depositConfiscated: false,
+            metadata: metadata
         });
 
         uint256[] memory topicIds = new uint256[](count);
         for (uint256 i = 0; i < count; i++) {
             address owner = topicOwners[i];
             require(owner != address(0), "TopicBountyEscrow: invalid topic owner");
-            topics[proposalId][i] = Topic({owner: owner});
+            topics[proposalId][i] = Topic({owner: owner, contentCid: contentCids[i]});
             topicIds[i] = i;
         }
 
-        emit ProposalCreated(proposalId, startTime, endTime, topicIds, topicOwners);
+        emit ProposalCreated(proposalId, startTime, endTime, topicIds, topicOwners, contentCids, metadata, msg.sender);
+    }
+
+    /**
+     * @dev 退还创作者押金（提案完成或过期后可调用）
+     * @param proposalId 提案 ID
+     */
+    function refundDeposit(uint256 proposalId) external nonReentrant {
+        Proposal storage proposal = proposals[proposalId];
+        require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
+        require(msg.sender == proposal.creator, "TopicBountyEscrow: not creator");
+        require(!proposal.depositRefunded, "TopicBountyEscrow: already refunded");
+        require(!proposal.depositConfiscated, "TopicBountyEscrow: deposit confiscated");
+        require(
+            proposal.status == ProposalStatus.Completed || proposal.status == ProposalStatus.Expired
+                || proposal.status == ProposalStatus.Denied,
+            "TopicBountyEscrow: proposal not finished"
+        );
+
+        proposal.depositRefunded = true;
+        guaToken.transfer(msg.sender, CREATOR_DEPOSIT);
+
+        emit DepositRefunded(proposalId, msg.sender, CREATOR_DEPOSIT);
+    }
+
+    /**
+     * @dev 标记提案为 spam（仅 Owner）
+     * @param proposalId 提案 ID
+     */
+    function markSpam(uint256 proposalId) external onlyOwner {
+        require(!proposalSpam[proposalId], "TopicBountyEscrow: already marked");
+        proposalSpam[proposalId] = true;
+        emit ProposalMarkedSpam(proposalId);
+    }
+
+    /**
+     * @dev 没收 spam 提案的押金（仅 Owner）
+     * @param proposalId 提案 ID
+     */
+    function confiscateDeposit(uint256 proposalId) external onlyOwner nonReentrant {
+        Proposal storage proposal = proposals[proposalId];
+        require(proposal.topicCount > 0, "TopicBountyEscrow: invalid proposal");
+        require(proposalSpam[proposalId], "TopicBountyEscrow: not marked spam");
+        require(!proposal.depositRefunded, "TopicBountyEscrow: already refunded");
+        require(!proposal.depositConfiscated, "TopicBountyEscrow: already confiscated");
+
+        proposal.depositConfiscated = true;
+        guaToken.transfer(treasury, CREATOR_DEPOSIT);
+
+        emit DepositConfiscated(proposalId, proposal.creator, CREATOR_DEPOSIT);
     }
 
     function finalizeVoting(uint256 proposalId) external whenNotPaused {

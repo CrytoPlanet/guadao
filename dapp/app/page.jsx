@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useI18n } from './components/LanguageProvider';
 import TokenBalance from '../components/TokenBalance';
 import { useAccount } from 'wagmi';
+import { useTheme } from './components/ThemeProvider';
 
 const DISCORD_URL = 'https://discord.gg/Gkg8mGEvMG';
 const YOUTUBE_URL = 'https://www.youtube.com/@cryptoplanet-i5k';
@@ -11,6 +12,7 @@ const YOUTUBE_URL = 'https://www.youtube.com/@cryptoplanet-i5k';
 export default function HomePage() {
   const { t, lang } = useI18n();
   const { isConnected } = useAccount();
+  const { mounted } = useTheme();
 
   const values = [
     { icon: '🎯', title: lang === 'zh' ? '自治而非独裁' : 'Self-governance', desc: lang === 'zh' ? '所有方向由群众共决' : 'All directions decided by the community' },
@@ -62,7 +64,7 @@ export default function HomePage() {
           </div>
         </div>
         <div className="status-card">
-          {isConnected && (
+          {mounted && isConnected && (
             <div className="status-row">
               <span>{lang === 'zh' ? '我的 GUA 余额' : 'My GUA Balance'}</span>
               <TokenBalance />

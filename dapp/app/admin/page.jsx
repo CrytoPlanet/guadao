@@ -26,14 +26,15 @@ import {
 import { useI18n } from '../components/LanguageProvider';
 import ExplorerLink from '../components/ExplorerLink';
 import StatusNotice from '../components/StatusNotice';
-import DateTimePicker from '../../components/DateTimePicker';
 
 const ESCROW_ABI = parseAbi([
-  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool)',
-  'function createProposal(address[] topicOwners,uint64 startTime,uint64 endTime) returns (uint256)',
+  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool,address,bool,bool,bytes32)',
+  'function createProposal(address[] topicOwners,bytes32[] contentCids,bytes32 metadata,uint64 startTime,uint64 endTime) returns (uint256)',
   'function finalizeVoting(uint256 proposalId)',
   'function confirmWinnerAndPay10(uint256 proposalId)',
   'function resolveDispute(uint256 proposalId,bool approve)',
+  'function markSpam(uint256 proposalId)',
+  'function confiscateDeposit(uint256 proposalId)',
   'function pause()',
   'function unpause()',
   'function paused() view returns (bool)',
@@ -66,9 +67,6 @@ export default function AdminPage() {
   const [status, setStatus] = useState(statusReady());
   const [chainTime, setChainTime] = useState(null);
   const [action, setAction] = useState('');
-  const [ownerInputs, setOwnerInputs] = useState(['', '', '']);
-  const [voteStart, setVoteStart] = useState('');
-  const [voteEnd, setVoteEnd] = useState('');
   const [lastTxHash, setLastTxHash] = useState('');
 
   const { address, isConnected } = useAccount();
@@ -149,16 +147,25 @@ export default function AdminPage() {
     }
   };
 
-  const runAction = async (name, fn, options = {}) => {
-    const { requireProposal = true } = options;
-    if (requireProposal && !proposalIdValue) {
-      setStatus(statusInvalidProposal());
-      return;
+  const runAction = async (name, fn) => {
+    setAction(name);
+    setStatus(statusTxSubmitted());
+    try {
+      const hash = await fn();
+      setLastTxHash(hash);
+      setStatus(statusTxConfirming());
+      await publicClient.waitForTransactionReceipt({ hash });
+      setStatus(statusTxConfirmed());
+      pausedResult.refetch();
+    } catch (error) {
+      console.error(error);
+      setStatus(statusError(error.shortMessage || error.message));
+    } finally {
+      setAction('');
     }
-    if (!isConnected) {
-      setStatus(statusError('airdrop.status.disconnected'));
-      return;
-    }
+  };
+
+  const handlePause = () => {
     if (!isAddress(escrowAddress)) {
       setStatus(statusInvalidAddress());
       return;
@@ -167,113 +174,36 @@ export default function AdminPage() {
       setStatus(statusNetworkMismatch());
       return;
     }
-    if (!publicClient) {
-      setStatus(statusNoRpc());
-      return;
-    }
-
-    try {
-      setAction(name);
-      setStatus(statusTxSubmitted());
-      const hash = await fn();
-      if (hash) setLastTxHash(hash);
-      setStatus(statusTxConfirming());
-      await publicClient.waitForTransactionReceipt({ hash });
-      setStatus(statusTxConfirmed());
-    } catch (error) {
-      const message = error?.shortMessage || error?.message || 'Action failed';
-      setStatus(statusError('status.error', { message }));
-    } finally {
-      setAction('');
-    }
-  };
-
-
-
-  const handlePause = () =>
-    runAction(
-      'pause',
-      () =>
-        writeContractAsync({
-          address: escrowAddress,
-          abi: ESCROW_ABI,
-          functionName: 'pause',
-          args: [],
-        }),
-      { requireProposal: false }
+    runAction('pause', () =>
+      writeContractAsync({
+        address: escrowAddress,
+        abi: ESCROW_ABI,
+        functionName: 'pause',
+        chainId: Number(targetChainId),
+      })
     );
-
-  const handleUnpause = () =>
-    runAction(
-      'unpause',
-      () =>
-        writeContractAsync({
-          address: escrowAddress,
-          abi: ESCROW_ABI,
-          functionName: 'unpause',
-          args: [],
-        }),
-      { requireProposal: false }
-    );
-
-  const updateOwner = (index, value) => {
-    setOwnerInputs((current) => {
-      const next = [...current];
-      next[index] = value;
-      return next;
-    });
   };
 
-  const addOwner = () => {
-    setOwnerInputs((current) => (current.length >= 5 ? current : [...current, '']));
-  };
-
-  const removeOwner = (index) => {
-    setOwnerInputs((current) => {
-      if (current.length <= 3) return current; // 最少保持 3 个
-      return current.filter((_, i) => i !== index);
-    });
-  };
-
-  const handleCreateProposal = () => {
-    const owners = ownerInputs.map((item) => item.trim()).filter(Boolean);
-    if (owners.length < 3 || owners.length > 5) {
-      setStatus(statusError('admin.create.owners'));
-      return;
-    }
-    if (!owners.every((item) => isAddress(item))) {
+  const handleUnpause = () => {
+    if (!isAddress(escrowAddress)) {
       setStatus(statusInvalidAddress());
       return;
     }
-    if (!voteStart.trim() || !voteEnd.trim()) {
-      setStatus(statusError('admin.create.start'));
+    if (chainMismatch) {
+      setStatus(statusNetworkMismatch());
       return;
     }
-    let start;
-    let end;
-    try {
-      start = BigInt(voteStart.trim());
-      end = BigInt(voteEnd.trim());
-    } catch (error) {
-      setStatus(statusError('admin.create.start'));
-      return;
-    }
-    if (end <= start) {
-      setStatus(statusError('admin.create.help'));
-      return;
-    }
-    runAction(
-      'create',
-      () =>
-        writeContractAsync({
-          address: escrowAddress,
-          abi: ESCROW_ABI,
-          functionName: 'createProposal',
-          args: [owners, start, end],
-        }),
-      { requireProposal: false }
+    runAction('unpause', () =>
+      writeContractAsync({
+        address: escrowAddress,
+        abi: ESCROW_ABI,
+        functionName: 'unpause',
+        chainId: Number(targetChainId),
+      })
     );
   };
+
+
 
   return (
     <main className="layout">
@@ -365,92 +295,6 @@ export default function AdminPage() {
             >
               {t('admin.pause.release')}
             </button>
-          </div>
-        </section>
-      )}
-
-      {isAdmin && (
-        <section className="panel">
-          <h2>🆕 {t('admin.create.title')}</h2>
-          <p className="hint">{t('admin.create.help')}</p>
-
-          <div className="status-row" style={{ marginBottom: '16px' }}>
-            <span>{lang === 'zh' ? 'Topic 数量' : 'Topic Count'}</span>
-            <span style={{ color: ownerInputs.filter(o => o.trim()).length >= 3 ? 'var(--accent)' : 'var(--primary)' }}>
-              {ownerInputs.filter(o => o.trim()).length} / 3-5
-            </span>
-          </div>
-
-          <div className="form-grid" style={{ gap: '12px' }}>
-            {ownerInputs.map((value, index) => (
-              <div key={`owner-${index}`} className="field full" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <div style={{ flex: 1 }}>
-                  <span style={{ display: 'block', marginBottom: '4px', fontSize: '0.875rem', textAlign: 'left' }}>
-                    Topic {index + 1} {t('admin.create.owners')}
-                  </span>
-                  <input
-                    value={value}
-                    placeholder="0x..."
-                    onChange={(event) => updateOwner(index, event.target.value)}
-                    style={{ width: '100%', textAlign: 'left' }}
-                  />
-                </div>
-                {ownerInputs.length > 3 && (
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    onClick={() => removeOwner(index)}
-                    style={{ padding: '8px 12px', minWidth: 'auto', marginTop: '20px' }}
-                    title={lang === 'zh' ? '移除' : 'Remove'}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="actions" style={{ marginTop: '12px', marginBottom: '16px' }}>
-            {ownerInputs.length < 5 && (
-              <button className="btn ghost" type="button" onClick={addOwner}>
-                + {t('admin.create.addOwner')}
-              </button>
-            )}
-          </div>
-
-          <div className="form-grid" style={{ gap: '16px', marginTop: '16px' }}>
-            <label className="field full">
-              <DateTimePicker
-                value={voteStart}
-                onChange={setVoteStart}
-                label={t('admin.create.start')}
-              />
-            </label>
-            <label className="field full">
-              <DateTimePicker
-                value={voteEnd}
-                onChange={setVoteEnd}
-                label={t('admin.create.end')}
-              />
-            </label>
-          </div>
-
-          <div className="actions" style={{ marginTop: '20px' }}>
-            <button
-              className="btn primary"
-              onClick={handleCreateProposal}
-              disabled={isWriting || action === 'create' || ownerInputs.filter(o => isAddress(o.trim())).length < 3}
-            >
-              {action === 'create' ? t('admin.create.submitting') : t('admin.create.submit')}
-            </button>
-          </div>
-          <StatusNotice status={status} />
-          <div className="status-row">
-            <span>{t('status.tx.latest')}</span>
-            <span className="inline-group">
-              {lastTxHash || '-'}
-              <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
-            </span>
           </div>
         </section>
       )}

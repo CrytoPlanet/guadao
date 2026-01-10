@@ -1,6 +1,14 @@
-import { createConfig, http } from 'wagmi';
+import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { base, baseSepolia, foundry } from 'viem/chains';
-import { injected, walletConnect, coinbaseWallet, safe } from 'wagmi/connectors';
+import {
+  metaMaskWallet,
+  walletConnectWallet,
+  coinbaseWallet,
+  safeWallet,
+  tokenPocketWallet,
+  injectedWallet,
+  ledgerWallet,
+} from '@rainbow-me/rainbowkit/wallets';
 
 import appConfig from '../config.json';
 
@@ -10,39 +18,43 @@ const chainById = {
   [foundry.id]: foundry,
 };
 
+// 获取配置的链ID列表
 const chainIds = Object.keys(appConfig.chains || {}).map((id) => Number(id));
-const chains = chainIds.map((id) => chainById[id]).filter(Boolean);
 
-const transports = chains.reduce((map, chain) => {
-  const rpcUrl = appConfig.chains?.[String(chain.id)]?.rpcUrl;
-  const fallback = chain.rpcUrls?.default?.http?.[0];
-  map[chain.id] = http(rpcUrl || fallback);
-  return map;
-}, {});
+// 将 defaultChainId 排在第一位，确保 wagmi 使用它作为默认链
+const defaultId = appConfig.defaultChainId;
+const sortedChainIds = defaultId
+  ? [defaultId, ...chainIds.filter((id) => id !== defaultId)]
+  : chainIds;
+
+const chains = sortedChainIds.map((id) => chainById[id]).filter(Boolean);
 
 const projectId =
   process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID ||
   appConfig.walletConnect?.projectId ||
   '';
 
-const connectors = [
-  safe(),
-  injected(),
-  ...(projectId
-    ? [
-      walletConnect({
-        projectId,
-        showQrModal: false,
-      }),
-    ]
-    : []),
-  coinbaseWallet({
-    appName: 'GUA Airdrop Claim',
-  }),
-];
-
-export const config = createConfig({
+export const config = getDefaultConfig({
+  appName: 'GUA dApp',
+  projectId,
   chains,
-  transports,
-  connectors,
+  wallets: [
+    {
+      groupName: 'Recommended',
+      wallets: [
+        metaMaskWallet,
+        safeWallet,
+        coinbaseWallet,
+        tokenPocketWallet,
+        ledgerWallet,
+      ],
+    },
+    {
+      groupName: 'Other',
+      wallets: [
+        walletConnectWallet,
+        injectedWallet,
+      ],
+    },
+  ],
 });

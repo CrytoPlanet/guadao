@@ -19,4 +19,9 @@ base_sepolia = "https://sepolia.base.org"
 base = { key = "${BASE_ETHERSCAN_API_KEY}" }
 base_sepolia = { key = "${BASE_ETHERSCAN_API_KEY}" }
 
+[[profile.default.fs_permissions]]
+access = "read-write"
+path = "./safe-calldata"
+
+
 

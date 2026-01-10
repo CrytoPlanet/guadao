@@ -95,14 +95,14 @@
 ---
 
 ## 合约与地址（Base）
-<!-- Latest Verification: 2026-01-07 (Chain 84532) -->
+<!-- Latest Verification: 2026-01-08 (Chain 31337) -->
 
 > 部署后把占位符替换为真实地址
 
 - Network: **Base Sepolia**
-- GUA Token: `0x13ce0501266fdfd25fda8befe8a92815d1a5af08`
-- MerkleAirdrop (Claim): `0x9b40014cc0b2ef7861ef318a242f0e9051caa979`
-- TopicBountyEscrow (Vote+Payout): `0x09ffd59910d17aa85598f362fcbec05b35978319`
+- GUA Token: `0x0dcd1bf9a1b36ce34237eeafef220932846bcd82`
+- MerkleAirdrop (Claim): `0x0b306bf915c4d645ff596e518faf3f9669b97016`
+- TopicBountyEscrow (Vote+Payout): `0xc6e7df5e7b4f2a278906862b61205850344d4e7d`
 - Treasury: `0x04caa97d9c6ffbcebf0edd924f110df28989ffcb`
 - Admin: `0x04caa97d9c6ffbcebf0edd924f110df28989ffcb`
 

@@ -17,6 +17,7 @@ export const getChainOptions = () => {
     id: Number(id),
     label: entry.label || id,
     airdropAddress: normalizeAddress(entry.airdropAddress),
+    universalAirdropAddress: normalizeAddress(entry.universalAirdropAddress),
     escrowAddress: normalizeAddress(entry.escrowAddress),
     guaTokenAddress: normalizeAddress(entry.guaTokenAddress),
     proofsUrl: entry.proofsUrl || '',

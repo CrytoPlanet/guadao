@@ -13,6 +13,8 @@ import {
 import { isAddress, parseAbi, formatUnits, parseUnits, keccak256, toHex } from 'viem';
 
 import { defaultChainId, getChainOptions } from '../../../lib/appConfig';
+import { bytes32ToCid, fetchFromIPFS } from '../../../lib/ipfs';
+import MarkdownRenderer from '../../components/MarkdownRenderer';
 import {
   statusReady,
   statusLoading,
@@ -34,10 +36,11 @@ import ProposalTimeline from '../../../components/ProposalTimeline';
 import ConfirmModal from '../../../components/ConfirmModal';
 import DisabledButton from '../../../components/DisabledButton';
 import GasEstimate from '../../../components/GasEstimate';
+import ScrollProgress from '../../components/ScrollProgress';
 
 const ESCROW_ABI = parseAbi([
-  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool)',
-  'function getTopic(uint256 proposalId,uint256 topicId) view returns (address)',
+  'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool,address,bool,bool,bytes32)',
+  'function getTopic(uint256 proposalId,uint256 topicId) view returns ((address owner, bytes32 contentCid))',
   'function stakeVote(uint256 proposalId,uint256 topicId,uint256 amount)',
   'function submitDelivery(uint256 proposalId,bytes32 youtubeUrlHash,bytes32 videoIdHash,bytes32 pinnedCodeHash)',
   'function challengeDelivery(uint256 proposalId,bytes32 reasonHash,bytes32 evidenceHash)',
@@ -55,7 +58,10 @@ const ERC20_ABI = parseAbi([
 ]);
 
 const ESCROW_EVENTS_ABI = parseAbi([
-  'event ProposalCreated(uint256 indexed proposalId,uint64 startTime,uint64 endTime,uint256[] topicIds,address[] topicOwners)',
+  'event ProposalCreated(uint256 indexed proposalId,uint64 startTime,uint64 endTime,uint256[] topicIds,address[] topicOwners,bytes32[] contentCids,bytes32 metadata,address indexed creator)',
+  'event DepositRefunded(uint256 indexed proposalId,address indexed creator,uint256 amount)',
+  'event DepositConfiscated(uint256 indexed proposalId,address indexed creator,uint256 amount)',
+  'event ProposalMarkedSpam(uint256 indexed proposalId)',
   'event Voted(address indexed voter,uint256 indexed proposalId,uint256 indexed topicId,uint256 amount)',
   'event VotingFinalized(uint256 indexed proposalId,uint256 winnerTopicId,uint256 totalPool)',
   'event WinnerConfirmed(uint256 indexed proposalId,uint256 indexed winnerTopicId,address indexed winnerOwner,uint256 payout10,uint256 submitDeadline)',
@@ -71,7 +77,7 @@ const STATUS_LABELS = {
 };
 
 const shortAddress = (address) =>
-  address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
+  (address && typeof address === 'string') ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
 
 const formatDateTime = (timestamp) => {
   if (!timestamp) return '-';
@@ -119,9 +125,12 @@ export default function ProposalDetailPage() {
   const [targetChainId, setTargetChainId] = useState(defaultChainId || '');
   const [escrowAddress, setEscrowAddress] = useState('');
   const [guaTokenAddress, setGuaTokenAddress] = useState('');
+
   const [events, setEvents] = useState([]);
+  const [proposalMetadata, setProposalMetadata] = useState(null);
   const [status, setStatus] = useState(statusReady());
   const [topics, setTopics] = useState([]);
+  const [expandedTopics, setExpandedTopics] = useState({});
   const [selectedTopic, setSelectedTopic] = useState('');
   const [voteAmount, setVoteAmount] = useState('');
   const [chainTime, setChainTime] = useState(null);
@@ -209,16 +218,40 @@ export default function ProposalDetailPage() {
       // Don't set global loading status here to avoid flickering logic,
       // or key it differently. For now, we only set 'loaded' or 'error'.
       // If we are refreshing, we might not want to show full page loading state.
-      const logs = await Promise.all(
-        ESCROW_EVENTS_ABI.map((event) =>
-          publicClient.getLogs({
-            address: escrowAddress,
-            event,
-            args: { proposalId: proposalIdValue },
-            fromBlock: activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n,
-          })
-        )
+
+      const currentBlock = await publicClient.getBlockNumber();
+      const startBlock = activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n;
+      const CHUNK_SIZE = 50000n;
+
+      const chunks = [];
+      for (let i = startBlock; i <= currentBlock; i += CHUNK_SIZE) {
+        const toBlock = i + CHUNK_SIZE - 1n < currentBlock ? i + CHUNK_SIZE - 1n : currentBlock;
+        chunks.push({ from: i, to: toBlock });
+      }
+
+      const logsResults = await Promise.all(
+        ESCROW_EVENTS_ABI.map(async (event) => {
+          const eventLogs = await Promise.all(
+            chunks.map(async ({ from, to }) => {
+              try {
+                return await publicClient.getLogs({
+                  address: escrowAddress,
+                  event,
+                  args: { proposalId: proposalIdValue },
+                  fromBlock: from,
+                  toBlock: to
+                });
+              } catch (e) {
+                console.warn(`Failed to fetch event logs range ${from}-${to}`, e);
+                return [];
+              }
+            })
+          );
+          return eventLogs.flat();
+        })
       );
+
+      const logs = logsResults.flat();
 
       const flattened = logs.flat();
       flattened.sort((a, b) => {
@@ -311,6 +344,25 @@ export default function ProposalDetailPage() {
   const submitDeadline = readField(proposalResult.data, 'submitDeadline', 7);
   const challengeWindowEnd = readField(proposalResult.data, 'challengeWindowEnd', 14);
   const remaining90 = readField(proposalResult.data, 'remaining90', 9);
+  const metadataHash = readField(proposalResult.data, 'metadata', 23);
+
+  // Fetch Proposal Metadata
+  useEffect(() => {
+    if (!metadataHash || metadataHash === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      setProposalMetadata(null);
+      return;
+    }
+    const load = async () => {
+      try {
+        const cid = bytes32ToCid(metadataHash);
+        const data = await fetchFromIPFS(cid);
+        setProposalMetadata(data);
+      } catch (e) {
+        console.error('Failed to fetch proposal metadata', e);
+      }
+    };
+    load();
+  }, [metadataHash]);
 
   // Load topics
   useEffect(() => {
@@ -327,15 +379,30 @@ export default function ProposalDetailPage() {
       const results = [];
       for (let i = 0; i < count; i += 1) {
         try {
-          const owner = await publicClient.readContract({
+          const topicData = await publicClient.readContract({
             address: escrowAddress,
             abi: ESCROW_ABI,
             functionName: 'getTopic',
             args: [proposalIdValue, BigInt(i)],
           });
-          results.push({ id: i, owner });
+
+          let meta = null;
+          if (topicData.contentCid && topicData.contentCid !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            try {
+              const cid = bytes32ToCid(topicData.contentCid);
+              meta = await fetchFromIPFS(cid);
+            } catch (e) { /* ignore */ }
+          }
+
+          results.push({
+            id: i,
+            owner: topicData.owner,
+            contentCid: topicData.contentCid,
+            title: meta?.title,
+            description: meta?.description
+          });
         } catch (error) {
-          results.push({ id: i, owner: null });
+          results.push({ id: i, owner: null, contentCid: null });
         }
       }
       setTopics(results);
@@ -619,6 +686,13 @@ export default function ProposalDetailPage() {
   const actionLocked = !isConnected || chainMismatch;
   const isAnyActionRunning = isWriting || action !== '';
 
+  const toggleTopic = (id) => {
+    setExpandedTopics((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
   return (
     <main className="layout">
       <ConfirmModal
@@ -633,8 +707,7 @@ export default function ProposalDetailPage() {
         <div>
           <p className="eyebrow">{t('proposal.detail.eyebrow')}</p>
           <h1>
-            {t('proposal.detail.title')}
-            {proposalIdValue?.toString() || '-'}
+            {proposalMetadata?.title ? proposalMetadata.title : `${t('proposal.detail.title')}${proposalIdValue?.toString() || '-'}`}
           </h1>
           <p className="lede">{t('proposal.detail.lede')}</p>
           <div className="hero-actions">
@@ -663,12 +736,20 @@ export default function ProposalDetailPage() {
           <div className="status-row">
             <span>{t('escrow.summary.winner')}</span>
             <span className="inline-group">
-              {shortAddress(winnerTopicResult.data)}
-              <CopyButton value={winnerTopicResult.data} />
+              {shortAddress(readField(winnerTopicResult.data, 'owner', 0))}
+              <CopyButton value={readField(winnerTopicResult.data, 'owner', 0)} />
             </span>
           </div>
         </div>
       </section>
+
+      {/* Proposal Description */}
+      {proposalMetadata?.description && (
+        <section className="panel">
+          <h2>{t('proposals.create.description')}</h2>
+          <MarkdownRenderer showToc={true}>{proposalMetadata.description}</MarkdownRenderer>
+        </section>
+      )}
 
       {/* Timeline */}
       <section className="panel">
@@ -757,9 +838,67 @@ export default function ProposalDetailPage() {
           {/* Topic Selection */}
           <div className="status-grid">
             {topics.map((topic) => (
-              <label key={topic.id} className="status-row">
-                <span>
-                  {t('voting.topic.select')} #{topic.id}
+              <div
+                key={topic.id}
+                id={`topic-${topic.id}`}
+                className="status-row"
+                style={{ alignItems: 'flex-start', scrollMarginTop: '120px', cursor: 'pointer' }}
+                onClick={(e) => {
+                  // Only select topic if clicking outside the expanded content
+                  if (!e.defaultPrevented) {
+                    setSelectedTopic(String(topic.id));
+                  }
+                }}
+              >
+                <span style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 'bold' }}>
+                      {topic.title ? topic.title : `${t('voting.topic.select')} #${topic.id}`}
+                    </span>
+                    {topic.description && (
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto', minHeight: 'unset' }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleTopic(topic.id);
+                        }}
+                      >
+                        {expandedTopics[topic.id] ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+                      </button>
+                    )}
+                  </div>
+
+                  {expandedTopics[topic.id] && topic.description && (
+                    <div
+                      style={{
+                        fontSize: '0.9em',
+                        marginTop: '4px',
+                        padding: '12px',
+                        background: 'rgba(0,0,0,0.03)',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(0,0,0,0.05)'
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                    >
+                      <MarkdownRenderer>{topic.description}</MarkdownRenderer>
+                    </div>
+                  )}
+
+                  {(!topic.title && !topic.description) && (
+                    <span>{t('voting.topic.select')} #{topic.id}</span>
+                  )}
+                  {topic.contentCid && (
+                    <span className="muted" style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      Hash: {shortAddress(topic.contentCid)}
+                      <CopyButton value={topic.contentCid} />
+                    </span>
+                  )}
                 </span>
                 <span className="inline-group">
                   {shortAddress(topic.owner)}
@@ -770,9 +909,10 @@ export default function ProposalDetailPage() {
                     value={topic.id}
                     checked={String(selectedTopic) === String(topic.id)}
                     onChange={() => setSelectedTopic(String(topic.id))}
+                    onClick={(e) => e.stopPropagation()}
                   />
                 </span>
-              </label>
+              </div>
             ))}
           </div>
 
@@ -1085,6 +1225,7 @@ export default function ProposalDetailPage() {
           </div>
         )}
       </section>
+      <ScrollProgress />
     </main>
   );
 }

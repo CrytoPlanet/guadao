@@ -8,6 +8,7 @@ export default function StatusNotice({ status, className = '' }) {
   if (!status) return null;
 
   const messageKey = status.messageKey || status.key || 'status.ready';
+  if (messageKey === 'status.loaded') return null;
   const message = t(messageKey, status.values);
   const kind = status.kind || 'neutral';
   const classes = ['status-notice', kind, className].filter(Boolean).join(' ');

@@ -143,6 +143,29 @@ export default function CreateProposalPage() {
         },
     });
 
+
+
+    // Auto-update Token Transfer addresses when target chain changes
+    useEffect(() => {
+        if (!activeChainConfig) return;
+
+        setActions(prevActions => prevActions.map(action => {
+            if (action.type !== 'token') return action;
+
+            // Check if current address matches any known GUA address from any chain
+            const isGuaToken = chainOptions.some(c => c.guaTokenAddress && c.guaTokenAddress.toLowerCase() === (action.tokenAddress || '').toLowerCase())
+                || action.tokenAddress === chainOptions.find(c => c.id === 84532)?.guaTokenAddress;
+
+            if (isGuaToken) {
+                const newAddress = activeChainConfig.guaTokenAddress || chainOptions.find(c => c.id === 84532)?.guaTokenAddress || '';
+                if (newAddress && newAddress !== action.tokenAddress) {
+                    return { ...action, tokenAddress: newAddress };
+                }
+            }
+            return action;
+        }));
+    }, [targetChainId, activeChainConfig, chainOptions]);
+
     // Read Proposal Threshold (DAO)
     const thresholdResult = useReadContract({
         address: isAddress(governorAddress) ? governorAddress : undefined,
@@ -1038,9 +1061,12 @@ Who is working on this?`
                                                     }}
                                                 >
                                                     <option value="custom">Custom</option>
-                                                    {chainOptions.find(c => c.id === chainId)?.guaTokenAddress && (
-                                                        <option value={chainOptions.find(c => c.id === chainId)?.guaTokenAddress}>GUA Token</option>
-                                                    )}
+                                                    <option value={
+                                                        // Use activeChainConfig (from targetChainId) instead of searching by wallet chainId
+                                                        activeChainConfig?.guaTokenAddress ||
+                                                        chainOptions.find(c => c.id === 84532)?.guaTokenAddress ||
+                                                        ''
+                                                    }>GUA Token</option>
                                                     {/* Placeholders for common tokens */}
                                                     <option value="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913">USDC (Base)</option>
                                                     <option value="0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2">USDT (Base)</option>
@@ -1049,7 +1075,21 @@ Who is working on this?`
                                                     value={act.tokenAddress || ''}
                                                     onChange={(e) => updateAction(idx, 'tokenAddress', e.target.value)}
                                                     placeholder="0x..."
-                                                    style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
+                                                    readOnly={act.tokenAddress && act.tokenAddress !== 'custom' && (
+                                                        act.tokenAddress === (activeChainConfig?.guaTokenAddress || chainOptions.find(c => c.id === 84532)?.guaTokenAddress) ||
+                                                        act.tokenAddress === '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' ||
+                                                        act.tokenAddress === '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2'
+                                                    )}
+                                                    // disabled={...} // Removed to ensure visibility
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '10px',
+                                                        borderRadius: '8px',
+                                                        border: '1px solid var(--border)',
+                                                        background: (act.tokenAddress && act.tokenAddress !== 'custom' && act.tokenAddress.length > 40) ? 'var(--bg-subtle)' : 'var(--input-bg)',
+                                                        color: 'var(--fg)',
+                                                        opacity: 1
+                                                    }}
                                                 />
                                             </div>
                                         </label>
@@ -1130,6 +1170,7 @@ Who is working on this?`
                                             actionIndex={idx}
                                             action={act}
                                             onUpdate={updateAction}
+                                            targetChainId={targetChainId} // Pass targetChainId prop
                                         />
 
                                         {/* Value override for payable functions if needed, though usually 0 for gov interactions */}

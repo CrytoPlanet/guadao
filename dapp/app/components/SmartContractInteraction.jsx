@@ -34,10 +34,22 @@ const UNIVERSAL_AIRDROP_ABI = [
     'function unpause()',
 ];
 
-export default function SmartContractInteraction({ actionIndex, action, onUpdate }) {
+const GOVERNOR_ABI = [
+    'function setVotingDelay(uint256 newVotingDelay)',
+    'function setVotingPeriod(uint256 newVotingPeriod)',
+    'function setProposalThreshold(uint256 newProposalThreshold)',
+    'function updateQuorumNumerator(uint256 newQuorumNumerator)',
+    'function updateTimelock(address newTimelock)',
+];
+
+export default function SmartContractInteraction({ actionIndex, action, onUpdate, targetChainId }) {
     const { t } = useI18n();
-    const { chainId } = useAccount();
-    const currentChain = config.chains[chainId] || config.chains[config.defaultChainId];
+    const { chainId: walletChainId } = useAccount();
+
+    // Use targetChainId if available (from parent), otherwise wallet chain, otherwise default
+    // clarifying: targetChainId is passed as number or string from parent state
+    const effectiveChainId = targetChainId ? Number(targetChainId) : (walletChainId || config.defaultChainId);
+    const currentChain = config.chains[effectiveChainId] || config.chains[config.defaultChainId];
 
     const [contractType, setContractType] = useState('custom'); // 'gua', 'timelock', 'escrow', 'airdrop', 'custom'
     const [selectedFunction, setSelectedFunction] = useState('');
@@ -45,13 +57,25 @@ export default function SmartContractInteraction({ actionIndex, action, onUpdate
     const [inputValues, setInputValues] = useState({});
     const [parsedAbi, setParsedAbi] = useState([]);
 
+    // Helper to get address with fallback to default chain
+    const getAddress = (key) => {
+        const addr = currentChain[key];
+        if (addr) return addr;
+        // Fallback to default chain if current chain is missing address (e.g. mainnet placeholder)
+        const defaultChain = config.chains[config.defaultChainId];
+        return defaultChain ? defaultChain[key] : '';
+    };
+
     // --- Contract Options ---
+    // Re-memoize or just define. Since getAddress depends on currentChain, and currentChain depends on props.
     const contracts = [
         { label: t('sci.contract.custom'), value: 'custom', address: '', abi: [] },
-        { label: t('sci.contract.gua'), value: 'gua', address: currentChain.guaTokenAddress, abi: ERC20_ABI },
-        { label: t('sci.contract.timelock'), value: 'timelock', address: currentChain.timelockAddress, abi: TIMELOCK_ABI },
-        { label: t('sci.contract.escrow'), value: 'escrow', address: currentChain.escrowAddress, abi: ESCROW_ABI },
-        { label: t('sci.contract.airdrop'), value: 'airdrop', address: currentChain.universalAirdropAddress, abi: UNIVERSAL_AIRDROP_ABI },
+        { label: t('sci.contract.gua'), value: 'gua', address: getAddress('guaTokenAddress'), abi: ERC20_ABI },
+        { label: t('sci.contract.governor'), value: 'governor', address: getAddress('governorAddress'), abi: GOVERNOR_ABI },
+        { label: t('sci.contract.timelock'), value: 'timelock', address: getAddress('timelockAddress'), abi: TIMELOCK_ABI },
+        { label: t('sci.contract.escrow'), value: 'escrow', address: getAddress('escrowAddress'), abi: ESCROW_ABI },
+        { label: t('sci.contract.universal'), value: 'universal', address: getAddress('universalAirdropAddress'), abi: UNIVERSAL_AIRDROP_ABI },
+        { label: t('sci.contract.merkle'), value: 'merkle', address: getAddress('airdropAddress'), abi: UNIVERSAL_AIRDROP_ABI }, // Assuming same ABI for admin functions
     ];
 
     // Initialize/Sync from parent action
@@ -63,7 +87,18 @@ export default function SmartContractInteraction({ actionIndex, action, onUpdate
             setContractType(knownContract.value);
             setParsedAbi(parseAbi(knownContract.abi));
         }
-    }, [action.target]);
+    }, [action.target]); // Only run on mount or if external target changes (e.g. loading draft)
+
+    // Watch for chain changes to update address if using a preset
+    useEffect(() => {
+        if (contractType !== 'custom') {
+            const selected = contracts.find(c => c.value === contractType);
+            if (selected && selected.address && selected.address !== action.target) {
+                console.log(`[SCI] Chain changed to ${effectiveChainId}, updating address: ${selected.address}`);
+                onUpdate(actionIndex, 'target', selected.address);
+            }
+        }
+    }, [effectiveChainId, contractType]); // Run when chain changes or type changes
 
     // Handle Contract Change
     const handleContractChange = (type) => {
@@ -145,7 +180,7 @@ export default function SmartContractInteraction({ actionIndex, action, onUpdate
                 <label className="field-label" style={{ display: 'block', fontSize: '0.9em', color: 'var(--muted)', marginBottom: '8px', fontWeight: 500 }}>
                     {t('sci.contract.label')}
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: contractType === 'custom' ? '1fr 1fr' : '1fr', gap: '12px', alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'center' }}>
                     <select
                         value={contractType}
                         onChange={(e) => handleContractChange(e.target.value)}
@@ -156,22 +191,23 @@ export default function SmartContractInteraction({ actionIndex, action, onUpdate
                         ))}
                     </select>
 
-                    {/* Show Address Input for Custom, or Read-only Display for others */}
-                    {contractType === 'custom' ? (
-                        <input
-                            type="text"
-                            value={action.target}
-                            onChange={(e) => onUpdate(actionIndex, 'target', e.target.value)}
-                            placeholder="0x..."
-                            style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--fg)' }}
-                        />
-                    ) : (
-                        // Optional: Display the resolved address for confirmation
-                        <div style={{ fontSize: '0.85em', color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '8px 12px', borderRadius: '6px', border: '1px solid transparent', display: 'flex', justifyContent: 'space-between' }}>
-                            <span>{t('treasury.token.address')}:</span>
-                            <span style={{ fontFamily: 'monospace' }}>{action.target}</span>
-                        </div>
-                    )}
+                    <input
+                        type="text"
+                        value={action.target}
+                        onChange={(e) => onUpdate(actionIndex, 'target', e.target.value)}
+                        placeholder="0x..."
+                        readOnly={contractType !== 'custom'}
+                        // disabled={contractType !== 'custom'} // user reported visibility issues, using readOnly + style instead
+                        style={{
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border)',
+                            background: contractType === 'custom' ? 'var(--input-bg)' : 'var(--bg-subtle)', // Use a theme var
+                            color: 'var(--fg)',
+                            cursor: contractType === 'custom' ? 'text' : 'default',
+                            opacity: 1,
+                        }}
+                    />
                 </div>
             </div>
 
@@ -220,23 +256,18 @@ export default function SmartContractInteraction({ actionIndex, action, onUpdate
             )}
 
             {/* 4. Value Field (Integrated) - Usually 0 but editable */}
-            {/* 4. Value Field (Optional/Advanced) */}
-            <details style={{ marginTop: '4px' }}>
-                <summary style={{ fontSize: '0.85em', color: 'var(--muted)', cursor: 'pointer', userSelect: 'none' }}>
-                    {t('sci.value.label')} (Advanced)
-                </summary>
-                <div style={{ marginTop: '8px' }}>
-                    <input
-                        value={action.value}
-                        onChange={(e) => onUpdate(actionIndex, 'value', e.target.value)}
-                        placeholder="0"
-                        style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--fg)' }}
-                    />
-                    <p style={{ fontSize: '0.75em', color: 'var(--muted)', marginTop: '4px' }}>
-                        Most governance actions do not require ETH value. Only set this if calling a payable function.
-                    </p>
-                </div>
-            </details>
+            {/* 4. Value Field (Integrated) */}
+            <div style={{ marginTop: '4px' }}>
+                <label style={{ fontSize: '0.85em', color: 'var(--muted)', marginBottom: '4px', display: 'block' }}>
+                    {t('sci.value.label')}
+                </label>
+                <input
+                    value={action.value}
+                    onChange={(e) => onUpdate(actionIndex, 'value', e.target.value)}
+                    placeholder="0"
+                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--fg)' }}
+                />
+            </div>
 
             {/* 5. Custom / Calldata Preview */}
             {(contractType === 'custom' && parsedAbi.length === 0) ? (

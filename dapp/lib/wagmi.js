@@ -8,6 +8,7 @@ import {
   tokenPocketWallet,
   injectedWallet,
   ledgerWallet,
+  rabbyWallet,
 } from '@rainbow-me/rainbowkit/wallets';
 
 import appConfig from '../config.json';
@@ -45,6 +46,7 @@ export const config = getDefaultConfig({
         metaMaskWallet,
         safeWallet,
         coinbaseWallet,
+        rabbyWallet,
         tokenPocketWallet,
         ledgerWallet,
       ],

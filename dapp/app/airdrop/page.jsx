@@ -615,16 +615,7 @@ export default function AirdropPage() {
           </div>
           <p className="hint">{t('airdrop.lede')}</p>
         </div>
-        {/* Debug Info for Local Anvil */}
-        {chainId === 31337 && (
-          <div style={{ marginTop: '1rem', padding: '0.5rem', background: '#333', color: '#0f0', fontSize: '0.7em', borderRadius: '4px', fontFamily: 'monospace' }}>
-            <p style={{ margin: 0 }}>DEBUG: Local Anvil</p>
-            <p style={{ margin: 0 }}>User: {address}</p>
-            <p style={{ margin: 0 }}>Owner: {universalOwnerResult.data || 'Loading...'}</p>
-            <p style={{ margin: 0 }}>IsAdmin: {String(isUniversalAdmin)}</p>
-            <p style={{ margin: 0 }}>Contract: {universalAirdropAddress}</p>
-          </div>
-        )}
+
       </section>
 
 

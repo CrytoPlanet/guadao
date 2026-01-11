@@ -20,6 +20,8 @@ export const getChainOptions = () => {
     universalAirdropAddress: normalizeAddress(entry.universalAirdropAddress),
     escrowAddress: normalizeAddress(entry.escrowAddress),
     guaTokenAddress: normalizeAddress(entry.guaTokenAddress),
+    governorAddress: normalizeAddress(entry.governorAddress),
+    timelockAddress: normalizeAddress(entry.timelockAddress),
     proofsUrl: entry.proofsUrl || '',
     rpcUrl: entry.rpcUrl || '',
     explorerUrl: entry.explorerUrl || '',

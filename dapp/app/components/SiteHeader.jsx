@@ -10,6 +10,7 @@ import { useAdmin } from './AdminProvider';
 import NetworkStatus from './NetworkStatus';
 import TokenBalance from '../../components/TokenBalance';
 import { useTheme } from '../components/ThemeProvider';
+import config from '../../config.json';
 
 export default function SiteHeader() {
   const { address, isConnected } = useAccount();

@@ -5,6 +5,7 @@ import { useI18n } from './components/LanguageProvider';
 import TokenBalance from '../components/TokenBalance';
 import { useAccount } from 'wagmi';
 import { useTheme } from './components/ThemeProvider';
+import config from '../config.json';
 
 const DISCORD_URL = 'https://discord.gg/Gkg8mGEvMG';
 const YOUTUBE_URL = 'https://www.youtube.com/@cryptoplanet-i5k';
@@ -136,6 +137,12 @@ export default function HomePage() {
           <Link className="btn ghost" href="/profile">
             {lang === 'zh' ? '👤 个人中心' : '👤 My Profile'}
           </Link>
+          <a className="btn ghost" href={config.governance.snapshotUrl} target="_blank" rel="noopener noreferrer">
+            ⚡ {lang === 'zh' ? '社区投票' : 'Snapshot Vote'}
+          </a>
+          <a className="btn ghost" href={config.governance.tallyUrl} target="_blank" rel="noopener noreferrer">
+            🏛️ {lang === 'zh' ? '协议治理' : 'Governance'}
+          </a>
         </div>
       </section>
 

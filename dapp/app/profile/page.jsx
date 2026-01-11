@@ -33,6 +33,11 @@ const ESCROW_EVENTS_ABI = parseAbi([
     'event ProposalCreated(uint256 indexed proposalId,uint64 startTime,uint64 endTime,uint256[] topicIds,address[] topicOwners,bytes32[] contentCids,bytes32 metadata,address indexed creator)',
 ]);
 
+const GOVERNOR_EVENTS_ABI = parseAbi([
+    'event VoteCast(address indexed voter, uint256 proposalId, uint8 support, uint256 weight, string reason)',
+    'event ProposalCreated(uint256 proposalId, address proposer, address[] targets, uint256[] values, string[] signatures, bytes[] calldatas, uint256 voteStart, uint256 voteEnd, string description)',
+]);
+
 const shortAddress = (address) =>
     address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
 
@@ -106,8 +111,17 @@ export default function ProfilePage() {
     const [airdrops, setAirdrops] = useState([]);
     const [airdropsStatus, setAirdropsStatus] = useState(statusEmpty());
 
+    // Governance votes data
+    const [govVotes, setGovVotes] = useState([]);
+    const [govVotesStatus, setGovVotesStatus] = useState(statusEmpty());
+
+    // Governance proposals created
+    const [govProposals, setGovProposals] = useState([]);
+    const [govProposalsStatus, setGovProposalsStatus] = useState(statusEmpty());
+
     const airdropAddress = chainConfig?.airdropAddress || '';
     const universalAirdropAddress = chainConfig?.universalAirdropAddress || '';
+    const governorAddress = chainConfig?.governorAddress || '';
 
     // Load Airdrop history
     useEffect(() => {
@@ -421,6 +435,113 @@ export default function ProfilePage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [publicClient, escrowAddress, address, isConnected, chainConfig]);
 
+    // Load Governance Votes (VoteCast from Governor)
+    useEffect(() => {
+        const loadGovVotes = async () => {
+            if (!publicClient || !isAddress(governorAddress) || !address) {
+                setGovVotes([]);
+                return;
+            }
+
+            try {
+                setGovVotesStatus(statusLoading());
+                const logs = await fetchLogsChunked(
+                    publicClient,
+                    {
+                        address: governorAddress,
+                        event: GOVERNOR_EVENTS_ABI[0], // VoteCast
+                        args: { voter: address },
+                    },
+                    chainConfig?.startBlock
+                );
+
+                const supportLabels = ['Against', 'For', 'Abstain'];
+                const mapped = logs.map((log) => ({
+                    proposalId: log.args?.proposalId?.toString() ?? '-',
+                    support: supportLabels[log.args?.support] || log.args?.support?.toString(),
+                    weight: log.args?.weight ? formatUnits(log.args.weight, 18) : '-',
+                    reason: log.args?.reason || '',
+                    blockNumber: log.blockNumber?.toString(),
+                    txHash: log.transactionHash,
+                }));
+
+                // Sort newest first
+                mapped.reverse();
+                setGovVotes(mapped);
+                setGovVotesStatus(mapped.length ? statusLoaded() : statusEmpty());
+            } catch (error) {
+                const message = error?.shortMessage || error?.message || 'Load failed';
+                setGovVotesStatus(statusError('status.error', { message }));
+            }
+        };
+
+        if (isConnected) {
+            loadGovVotes();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [publicClient, governorAddress, address, isConnected, chainConfig]);
+
+    // Load Governance Proposals Created by User
+    useEffect(() => {
+        const loadGovProposals = async () => {
+            if (!publicClient || !isAddress(governorAddress) || !address) {
+                setGovProposals([]);
+                return;
+            }
+
+            try {
+                setGovProposalsStatus(statusLoading());
+                const logs = await fetchLogsChunked(
+                    publicClient,
+                    {
+                        address: governorAddress,
+                        event: GOVERNOR_EVENTS_ABI[1], // ProposalCreated
+                    },
+                    chainConfig?.startBlock
+                );
+
+                // Filter by proposer address (not indexed, so we filter client-side)
+                const userLogs = logs.filter(log =>
+                    log.args?.proposer?.toLowerCase() === address.toLowerCase()
+                );
+
+                const mapped = userLogs.map((log) => {
+                    // Extract title from description (usually # Title\n\nDescription)
+                    let title = '';
+                    const desc = log.args?.description || '';
+                    const match = desc.match(/^#\s*(.+?)(\n|$)/);
+                    if (match) {
+                        title = match[1];
+                    } else {
+                        title = desc.slice(0, 50) || 'Untitled';
+                    }
+
+                    return {
+                        proposalId: log.args?.proposalId?.toString() ?? '-',
+                        title,
+                        voteStart: log.args?.voteStart?.toString(),
+                        voteEnd: log.args?.voteEnd?.toString(),
+                        blockNumber: log.blockNumber?.toString(),
+                        txHash: log.transactionHash,
+                    };
+                });
+
+                // Sort newest first
+                mapped.reverse();
+                setGovProposals(mapped);
+                setGovProposalsStatus(mapped.length ? statusLoaded() : statusEmpty());
+            } catch (error) {
+                const message = error?.shortMessage || error?.message || 'Load failed';
+                setGovProposalsStatus(statusError('status.error', { message }));
+            }
+        };
+
+        if (isConnected) {
+            loadGovProposals();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [publicClient, governorAddress, address, isConnected, chainConfig]);
+
     // Compute aggregated transactions from all activities
     const transactions = useMemo(() => {
         const txList = [];
@@ -475,8 +596,10 @@ export default function ProfilePage() {
 
     const tabs = [
         { id: 'proposals', label: t('profile.tab.proposals') },
+        { id: 'govProposals', label: t('profile.govProposals') },
         { id: 'topics', label: t('profile.topics') },
         { id: 'votes', label: t('profile.votes') },
+        { id: 'govVotes', label: t('profile.govVotes') },
         { id: 'challenges', label: t('profile.challenges') },
         { id: 'airdrops', label: t('profile.airdrops') },
         { id: 'transactions', label: t('profile.transactions') },
@@ -511,7 +634,7 @@ export default function ProfilePage() {
             </section>
 
             {/* Stats Grid */}
-            <section className="panel" style={{ background: 'transparent', border: 'none', padding: '0', boxShadow: 'none', marginBottom: '20px' }}>
+            <section className="panel" style={{ background: 'transparent', border: 'none', padding: '0', boxShadow: 'none', marginBottom: '12px', marginTop: '-8px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px' }}>
                     <div className="status-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
                         <span style={{ fontSize: '0.85rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
@@ -599,6 +722,31 @@ export default function ProfilePage() {
                 </section>
             )}
 
+            {activeTab === 'govProposals' && (
+                <section className="panel">
+                    <h2>{t('profile.govProposals')}</h2>
+                    {govProposals.length === 0 ? (
+                        <>
+                            <p className="muted">{t('profile.noGovProposals')}</p>
+                            <StatusNotice status={govProposalsStatus} />
+                        </>
+                    ) : (
+                        <div className="status-grid">
+                            {govProposals.map((item, index) => (
+                                <Link key={`govprop-${index}`} href={`/governance/${item.proposalId}`} className="status-row" style={{ textDecoration: 'none', color: 'inherit', cursor: 'pointer' }}>
+                                    <span>
+                                        {item.title || `Proposal ${item.proposalId.slice(0, 8)}...`}
+                                    </span>
+                                    <span className="muted">
+                                        #{item.blockNumber}
+                                    </span>
+                                </Link>
+                            ))}
+                        </div>
+                    )}
+                </section>
+            )}
+
             {activeTab === 'airdrops' && (
                 <section className="panel">
                     <h2>{t('profile.airdrops')}</h2>
@@ -639,6 +787,32 @@ export default function ProfilePage() {
                                         {proposalTitles[vote.proposalId] ? proposalTitles[vote.proposalId] : `${t('proposal.detail.title')}${vote.proposalId}`} / Topic #{vote.topicId}
                                     </span>
                                     <span>{vote.amount} GUA</span>
+                                </Link>
+                            ))}
+                        </div>
+                    )}
+                </section>
+            )}
+
+            {activeTab === 'govVotes' && (
+                <section className="panel">
+                    <h2>{t('profile.govVotes')}</h2>
+                    {govVotes.length === 0 ? (
+                        <>
+                            <p className="muted">{t('profile.noGovVotes')}</p>
+                            <StatusNotice status={govVotesStatus} />
+                        </>
+                    ) : (
+                        <div className="status-grid">
+                            {govVotes.map((vote, index) => (
+                                <Link key={`govvote-${index}`} href={`/governance/${vote.proposalId}`} className="status-row" style={{ textDecoration: 'none', color: 'inherit', cursor: 'pointer' }}>
+                                    <span>
+                                        {t('proposal.detail.title')}{vote.proposalId.length > 10 ? `${vote.proposalId.slice(0, 6)}...` : vote.proposalId}
+                                    </span>
+                                    <span className="inline-group">
+                                        <span className={`badge ${vote.support === 'For' ? 'success' : vote.support === 'Against' ? 'error' : ''}`}>{vote.support}</span>
+                                        <span>{vote.weight} GUA</span>
+                                    </span>
                                 </Link>
                             ))}
                         </div>

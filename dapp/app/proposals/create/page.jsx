@@ -15,6 +15,10 @@ import { uploadToIPFS, cidToBytes32, createTopicContent } from '../../../lib/ipf
 
 import MarkdownRenderer from '../../components/MarkdownRenderer';
 import MarkdownEditor from '../../components/MarkdownEditor';
+import DateTimePicker from '../../components/DateTimePicker';
+import SmartContractInteraction from '../../components/SmartContractInteraction';
+
+// Force recompile trigger
 
 import { defaultChainId, getChainOptions } from '../../../lib/appConfig';
 import {
@@ -30,7 +34,6 @@ import {
 import { useI18n } from '../../components/LanguageProvider';
 import { useTheme } from '../../components/ThemeProvider';
 import StatusNotice from '../../components/StatusNotice';
-import DateTimePicker from '../../components/DateTimePicker';
 import ExplorerLink from '../../components/ExplorerLink';
 
 const ESCROW_ABI = parseAbi([
@@ -51,7 +54,7 @@ const TOKEN_ABI = parseAbi([
 
 
 const GOVERNOR_ABI = parseAbi([
-    'function propose(address[] targets, uint256[] values, string[] signatures, bytes[] calldatas, string description) returns (uint256)',
+    'function propose(address[] targets, uint256[] values, bytes[] calldatas, string description) returns (uint256)',
     'function proposalThreshold() view returns (uint256)',
 ]);
 
@@ -511,7 +514,7 @@ export default function CreateProposalPage() {
                     address: governorAddress,
                     abi: GOVERNOR_ABI,
                     functionName: 'propose',
-                    args: [targets, values, signatures, calldatas, fullDescription],
+                    args: [targets, values, calldatas, fullDescription],
                 });
                 setLastTxHash(hash);
                 setStatus(statusTxConfirming());
@@ -976,141 +979,173 @@ Who is working on this?`
                                 </button>
                             </div>
 
-                            {/* Action Type Selector */}
-                            <div style={{ marginBottom: '1rem', display: 'flex', gap: '8px' }}>
-                                <button
-                                    className={`btn ${(!act.type || act.type === 'custom') ? 'primary sm' : 'ghost sm'}`}
-                                    onClick={() => handleActionTypeChange(idx, 'custom')}
-                                >
-                                    {t('governance.actions.type.custom')}
-                                </button>
-                                <button
-                                    className={`btn ${act.type === 'native' ? 'primary sm' : 'ghost sm'}`}
-                                    onClick={() => handleActionTypeChange(idx, 'native')}
-                                >
-                                    {t('governance.actions.type.native')}
-                                </button>
-                                <button
-                                    className={`btn ${act.type === 'token' ? 'primary sm' : 'ghost sm'}`}
-                                    onClick={() => handleActionTypeChange(idx, 'token')}
-                                >
-                                    {t('governance.actions.type.token')}
-                                </button>
+                            {/* Action Type Tabs */}
+                            <div style={{ marginBottom: '1rem', display: 'flex', background: 'var(--bg-sub)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                {['custom', 'native', 'token'].map((type) => (
+                                    <button
+                                        key={type}
+                                        className={`btn ${((!act.type && type === 'custom') || act.type === type) ? 'secondary sm' : 'ghost sm'}`}
+                                        style={{
+                                            flex: 1,
+                                            background: ((!act.type && type === 'custom') || act.type === type) ? 'var(--bg-surface)' : 'transparent',
+                                            boxShadow: ((!act.type && type === 'custom') || act.type === type) ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            color: ((!act.type && type === 'custom') || act.type === type) ? 'var(--fg)' : 'var(--muted)',
+                                            fontWeight: 500
+                                        }}
+                                        onClick={() => handleActionTypeChange(idx, type)}
+                                    >
+                                        {t(`governance.actions.type.${type}`)}
+                                    </button>
+                                ))}
                             </div>
 
                             <div className="form-grid">
                                 {act.type === 'token' ? (
-                                    <>
+                                    <div style={{
+                                        gridColumn: '1/-1',
+                                        background: 'var(--bg-sub)',
+                                        padding: '20px',
+                                        borderRadius: '12px',
+                                        border: '1px solid var(--border)',
+                                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '16px'
+                                    }}>
                                         <label className="field full">
-                                            <span>{t('governance.actions.tokenAddress')}</span>
-                                            <input
-                                                value={act.tokenAddress || ''}
-                                                onChange={(e) => updateAction(idx, 'tokenAddress', e.target.value)}
-                                                placeholder="0x..."
-                                            />
+                                            <span className="field-label" style={{ fontWeight: 500, marginBottom: '8px' }}>{t('governance.actions.tokenAddress')}</span>
+                                            <div className="inline-group" style={{ gap: '8px' }}>
+                                                <select
+                                                    style={{ width: 'auto', minWidth: '120px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        if (val !== 'custom') {
+                                                            updateAction(idx, 'tokenAddress', val);
+                                                            // Auto-set decimals
+                                                            if (val === '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' || val === '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2') {
+                                                                // USDC, USDT on Base are 6 decimals
+                                                                updateAction(idx, 'decimals', '6');
+                                                            } else {
+                                                                // GUA (18) and others default to 18
+                                                                updateAction(idx, 'decimals', '18');
+                                                            }
+                                                        } else {
+                                                            updateAction(idx, 'tokenAddress', '');
+                                                            updateAction(idx, 'decimals', '18'); // Reset to default
+                                                        }
+                                                    }}
+                                                >
+                                                    <option value="custom">Custom</option>
+                                                    {chainOptions.find(c => c.id === chainId)?.guaTokenAddress && (
+                                                        <option value={chainOptions.find(c => c.id === chainId)?.guaTokenAddress}>GUA Token</option>
+                                                    )}
+                                                    {/* Placeholders for common tokens */}
+                                                    <option value="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913">USDC (Base)</option>
+                                                    <option value="0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2">USDT (Base)</option>
+                                                </select>
+                                                <input
+                                                    value={act.tokenAddress || ''}
+                                                    onChange={(e) => updateAction(idx, 'tokenAddress', e.target.value)}
+                                                    placeholder="0x..."
+                                                    style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
+                                                />
+                                            </div>
                                         </label>
                                         <label className="field full">
-                                            <span>{t('governance.actions.recipient')}</span>
+                                            <span className="field-label" style={{ fontWeight: 500, marginBottom: '8px' }}>{t('governance.actions.recipient')}</span>
                                             <input
                                                 value={act.recipient || ''}
                                                 onChange={(e) => updateAction(idx, 'recipient', e.target.value)}
                                                 placeholder="0x..."
+                                                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
                                             />
                                         </label>
-                                        <label className="field">
-                                            <span>{t('governance.actions.amount')}</span>
-                                            <input
-                                                value={act.amount || ''}
-                                                onChange={(e) => updateAction(idx, 'amount', e.target.value)}
-                                                placeholder="100.0"
-                                            />
-                                        </label>
-                                        <label className="field">
-                                            <span>{t('governance.actions.decimals')}</span>
-                                            <input
-                                                value={act.decimals || '18'}
-                                                onChange={(e) => updateAction(idx, 'decimals', e.target.value)}
-                                                type="number"
-                                            />
-                                        </label>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
+                                            <label className="field">
+                                                <span className="field-label" style={{ fontWeight: 500, marginBottom: '8px' }}>{t('governance.actions.amount')}</span>
+                                                <input
+                                                    value={act.amount || ''}
+                                                    onChange={(e) => updateAction(idx, 'amount', e.target.value)}
+                                                    placeholder="100.0"
+                                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
+                                                />
+                                            </label>
+                                            <label className="field">
+                                                <span className="field-label" style={{ fontWeight: 500, marginBottom: '8px' }}>{t('governance.actions.decimals')}</span>
+                                                <input
+                                                    value={act.decimals || '18'}
+                                                    onChange={(e) => updateAction(idx, 'decimals', e.target.value)}
+                                                    type="number"
+                                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
+                                                />
+                                            </label>
+                                        </div>
                                         <label className="field full">
-                                            <span>{t('governance.actions.generatedCalldata')}</span>
+                                            <span className="field-label" style={{ fontWeight: 500, marginBottom: '8px' }}>{t('governance.actions.generatedCalldata')}</span>
                                             <textarea
                                                 readOnly
                                                 disabled
                                                 rows="2"
                                                 value={act.calldata}
-                                                style={{ fontFamily: 'monospace', fontSize: '0.85em', opacity: 0.7 }}
+                                                style={{ fontFamily: 'monospace', fontSize: '0.85em', opacity: 0.7, padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'rgba(0,0,0,0.05)', width: '100%' }}
                                             />
                                         </label>
-                                    </>
-                                ) : (
-                                    <>
+                                    </div>
+                                ) : act.type === 'native' ? (
+                                    <div style={{
+                                        gridColumn: '1/-1',
+                                        background: 'var(--bg-sub)',
+                                        padding: '20px',
+                                        borderRadius: '12px',
+                                        border: '1px solid var(--border)',
+                                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '16px'
+                                    }}>
                                         <label className="field full">
-                                            <span>{t('governance.actions.target')} (Address)</span>
+                                            <span className="field-label" style={{ fontWeight: 500, marginBottom: '8px' }}>{t('governance.actions.recipient')}</span>
                                             <input
-                                                value={act.target}
-                                                onChange={(e) => updateAction(idx, 'target', e.target.value)}
+                                                value={act.recipient || ''}
+                                                onChange={(e) => updateAction(idx, 'recipient', e.target.value)}
                                                 placeholder="0x..."
+                                                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
                                             />
                                         </label>
-                                        <label className="field">
-                                            <span>{t('governance.actions.value')} (ETH)</span>
+                                        <label className="field full">
+                                            <span className="field-label" style={{ fontWeight: 500, marginBottom: '8px' }}>{t('governance.actions.amount')} (ETH)</span>
                                             <input
-                                                value={act.value}
-                                                onChange={(e) => updateAction(idx, 'value', e.target.value)}
+                                                value={act.amount || ''}
+                                                onChange={(e) => updateAction(idx, 'amount', e.target.value)}
                                                 placeholder="0.0"
-                                                disabled={act.type === 'native' ? false : false} // Just explicitly show it
+                                                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)' }}
                                             />
                                         </label>
-                                        {act.type !== 'native' && (
-                                            <label className="field full">
-                                                <span>{t('governance.actions.signature')} (Optional)</span>
-                                                <input
-                                                    value={act.signature}
-                                                    onChange={(e) => updateAction(idx, 'signature', e.target.value)}
-                                                    placeholder="e.g. transfer(address,uint256)"
-                                                />
-                                            </label>
-                                        )}
+                                    </div>
+                                ) : (
+                                    <div style={{ gridColumn: '1/-1' }}>
+                                        <SmartContractInteraction
+                                            actionIndex={idx}
+                                            action={act}
+                                            onUpdate={updateAction}
+                                        />
 
-                                        {/* Dynamic Inputs from Signature */}
-                                        {act.abiInputs && act.abiInputs.length > 0 && (
-                                            <div style={{ gridColumn: '1/-1', borderLeft: '2px solid var(--accent)', paddingLeft: '1rem', marginBottom: '0.5rem' }}>
-                                                <p className="hint" style={{ marginBottom: '0.5rem' }}>Auto-detected Parameters:</p>
-                                                {act.abiInputs.map((input, i) => (
-                                                    <label key={i} className="field full" style={{ marginBottom: '0.5rem' }}>
-                                                        <span style={{ fontSize: '0.85em', color: 'var(--muted)' }}>{input.name || `Param #${i + 1}`} ({input.type})</span>
-                                                        <input
-                                                            value={act.args && act.args[i] || ''}
-                                                            onChange={(e) => updateAction(idx, `arg_${i}`, e.target.value)}
-                                                            placeholder={input.type}
-                                                        />
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {act.type !== 'native' && (
-                                            <label className="field full">
-                                                <span>{t('governance.actions.calldata')} (Hex)</span>
-                                                <textarea
-                                                    value={act.calldata}
-                                                    onChange={(e) => updateAction(idx, 'calldata', e.target.value)}
-                                                    placeholder="0x..."
-                                                    style={{ fontFamily: 'monospace', fontSize: '0.85em', minHeight: '60px' }}
-                                                />
-                                            </label>
-                                        )}
-                                    </>
+                                        {/* Value override for payable functions if needed, though usually 0 for gov interactions */}
+                                        {/* REMOVED: Redundant value input */}
+                                    </div>
                                 )}
                             </div>
                         </div>
-                    ))}
-                    {actions.length === 0 && (
-                        <p className="muted" style={{ textAlign: 'center', padding: '1rem' }}>No actions added.</p>
-                    )}
-                </section>
+                    ))
+                    }
+                    {
+                        actions.length === 0 && (
+                            <p className="muted" style={{ textAlign: 'center', padding: '1rem' }}>No actions added.</p>
+                        )
+                    }
+                </section >
             )}
 
             <section className="panel">

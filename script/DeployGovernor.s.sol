@@ -4,7 +4,7 @@ pragma solidity ^0.8.33;
 import {Script, console} from "forge-std/Script.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {GUAGovernor} from "../contracts/GUAGovernor.sol";
-import {GUATokenV2} from "../contracts/GUATokenV2.sol";
+import {GUAToken} from "../contracts/GUAToken.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 /**
@@ -13,7 +13,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
  * @notice 使用方式: forge script script/DeployGovernor.s.sol:DeployGovernor --rpc-url <RPC_URL> --broadcast --verify
  *
  * 前提条件：
- * 1. GUAToken 已升级到 V2 (支持 ERC20Votes)
+ * 1. GUAToken 已升级到支持 ERC20Votes
  * 2. 配置环境变量：
  *    - PRIVATE_KEY: 部署者私钥
  *    - GUA_TOKEN_ADDRESS: GUA Token 代理地址

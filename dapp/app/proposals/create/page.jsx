@@ -44,7 +44,11 @@ const TOKEN_ABI = parseAbi([
     'function allowance(address owner,address spender) view returns (uint256)',
     'function getVotes(address account) view returns (uint256)',
     'function delegate(address delegatee)',
+    'function balanceOf(address account) view returns (uint256)',
 ]);
+
+
+
 
 const GOVERNOR_ABI = parseAbi([
     'function propose(address[] targets, uint256[] values, string[] signatures, bytes[] calldatas, string description) returns (uint256)',
@@ -60,6 +64,7 @@ export default function CreateProposalPage() {
     const [status, setStatus] = useState(statusReady());
     const [lastTxHash, setLastTxHash] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [delegatee, setDelegatee] = useState('');
 
     // Proposal Type: 'bounty' or 'dao'
     const [proposalType, setProposalType] = useState('bounty');
@@ -156,6 +161,18 @@ export default function CreateProposalPage() {
         },
     });
 
+    // Read User Balance
+    const balanceResult = useReadContract({
+        address: isAddress(tokenAddress) ? tokenAddress : undefined,
+        abi: TOKEN_ABI,
+        functionName: 'balanceOf',
+        args: address ? [address] : undefined,
+        query: {
+            enabled: isAddress(tokenAddress) && Boolean(address),
+        },
+    });
+    const userBalance = balanceResult.data || 0n;
+
     // Sync targetChainId with wallet chainId
     useEffect(() => {
         if (chainId && chainOptions.some(c => c.id === chainId)) {
@@ -182,6 +199,10 @@ export default function CreateProposalPage() {
     const proposalThreshold = thresholdResult.data || 0n;
     const userVotes = votesResult.data || 0n;
     const canPropose = proposalType === 'dao' ? userVotes >= proposalThreshold : true;
+    const showDelegateNotice = proposalType === 'dao' && !canPropose;
+    // If balance > threshold but votes < threshold, user likely needs to delegate
+    // If balance < threshold, delegating won't help enough (unless they get more tokens)
+    const isBalanceInsufficient = userBalance < proposalThreshold;
 
     const addTopic = () => {
         if (topics.length >= 5) return;
@@ -349,13 +370,14 @@ export default function CreateProposalPage() {
 
     const handleDelegate = async () => {
         if (!address) return;
+        const targetDelegate = isAddress(delegatee) ? delegatee : address;
         try {
             setStatus(statusTxConfirming());
             const hash = await writeContractAsync({
                 address: tokenAddress,
                 abi: TOKEN_ABI,
                 functionName: 'delegate',
-                args: [address],
+                args: [targetDelegate],
             });
             setLastTxHash(hash);
             await publicClient.waitForTransactionReceipt({ hash });
@@ -573,6 +595,73 @@ export default function CreateProposalPage() {
                     )}
                 </div>
             </section>
+
+            {showDelegateNotice && (
+                <div className={`notice ${isBalanceInsufficient ? 'error' : 'warning'}`} style={{ marginBottom: '1.5rem', animation: 'fadeIn 0.3s' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <h3 style={{ margin: 0, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {t('governance.warning.delegate.title')}
+                        </h3>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', fontSize: '0.9em', color: 'var(--muted)', marginTop: '4px' }}>
+                            <div>
+                                <span>{t('governance.delegate.required')} </span>
+                                <strong style={{ color: 'var(--fg)' }}>{formatGUA(proposalThreshold)}</strong>
+                            </div>
+                            <div>
+                                <span>{t('governance.delegate.yourVotes')} </span>
+                                <strong style={{ color: 'var(--error)' }}>{formatGUA(userVotes)}</strong>
+                            </div>
+                            <div>
+                                <span>{t('governance.delegate.yourBalance')} </span>
+                                <strong style={{ color: isBalanceInsufficient ? 'var(--error)' : 'var(--success)' }}>
+                                    {formatGUA(userBalance)}
+                                </strong>
+                            </div>
+                        </div>
+
+                        <p style={{ margin: '0', fontSize: '0.95em', lineHeight: '1.5' }}>
+                            {isBalanceInsufficient
+                                ? <span dangerouslySetInnerHTML={{ __html: t('governance.warning.delegate.insufficient', { threshold: formatGUA(proposalThreshold), balance: formatGUA(userBalance) }) }} />
+                                : t('governance.warning.delegate.needed')}
+                        </p>
+
+                        <div style={{ marginTop: '4px', padding: '16px', background: 'var(--bg-sub)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                            <p style={{ marginBottom: '8px', fontSize: '0.9em', fontWeight: 'bold' }}>{t('governance.delegate.to')}</p>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <input
+                                    value={delegatee}
+                                    onChange={(e) => setDelegatee(e.target.value)}
+                                    placeholder={t('governance.delegate.placeholder')}
+                                    style={{
+                                        flex: 1,
+                                        minWidth: '200px',
+                                        padding: '10px 12px',
+                                        fontSize: '0.95em',
+                                        background: 'var(--input-bg)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: '6px',
+                                        color: 'var(--fg)'
+                                    }}
+                                />
+                                <button
+                                    className="btn primary sm"
+                                    onClick={handleDelegate}
+                                    disabled={isSubmitting}
+                                    style={{ whiteSpace: 'nowrap', padding: '10px 20px' }}
+                                >
+                                    {t('governance.delegate.action')}
+                                </button>
+                            </div>
+                            <p style={{ fontSize: '0.85em', color: 'var(--muted)', marginTop: '8px', fontStyle: 'italic' }}>
+                                {delegatee && isAddress(delegatee)
+                                    ? t('governance.delegate.status.to', { address: `${delegatee.slice(0, 6)}...${delegatee.slice(-4)}` })
+                                    : t('governance.delegate.status.self')}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Proposal Type Selector */}
             <section className="panel">
@@ -1027,20 +1116,7 @@ Who is working on this?`
             <section className="panel">
                 <h2>{t('proposals.create.submit')}</h2>
 
-                {proposalType === 'dao' && !canPropose && (
-                    <div className="notice warning" style={{ marginBottom: '1rem', border: '1px solid orange', padding: '1rem', borderRadius: '4px' }}>
-                        <p style={{ marginBottom: '0.5rem' }}>
-                            <strong>{t('governance.warning.delegateCheck')}</strong>
-                            <br />
-                            <span className="muted" style={{ fontSize: '0.9em' }}>
-                                Required: {formatGUA(proposalThreshold)} Votes. You have: {formatGUA(userVotes)}.
-                            </span>
-                        </p>
-                        <button className="btn primary sm" onClick={handleDelegate} disabled={isSubmitting}>
-                            {t('governance.delegate.action')}
-                        </button>
-                    </div>
-                )}
+
 
                 <div className="actions">
                     {needsApproval && (

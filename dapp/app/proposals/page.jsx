@@ -526,6 +526,13 @@ export default function ProposalsPage() {
             </div>
             <p className="muted" style={{ margin: 0, fontSize: '0.85em' }}>{t('governance.portal.desc.tally')}</p>
           </a>
+          <Link href="/treasury" className="status-card" style={{ display: 'block', textDecoration: 'none', color: 'inherit', padding: '1rem', minHeight: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '1.2rem' }}>💰</span>
+              <strong>{t('governance.portal.treasury')} →</strong>
+            </div>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85em' }}>{t('governance.portal.desc.treasury')}</p>
+          </Link>
         </div>
       </section>
 

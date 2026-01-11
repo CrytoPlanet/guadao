@@ -43,6 +43,7 @@ const TOKEN_ABI = parseAbi([
     'function approve(address spender,uint256 amount) returns (bool)',
     'function allowance(address owner,address spender) view returns (uint256)',
     'function getVotes(address account) view returns (uint256)',
+    'function delegate(address delegatee)',
 ]);
 
 const GOVERNOR_ABI = parseAbi([
@@ -346,12 +347,31 @@ export default function CreateProposalPage() {
         }
     };
 
-    const handleSubmit = async () => {
-        // Validation Common
-        if (!isConnected) {
-            setStatus(statusError('airdrop.status.disconnected'));
-            return;
+    const handleDelegate = async () => {
+        if (!address) return;
+        try {
+            setStatus(statusTxConfirming());
+            const hash = await writeContractAsync({
+                address: tokenAddress,
+                abi: TOKEN_ABI,
+                functionName: 'delegate',
+                args: [address],
+            });
+            setLastTxHash(hash);
+            await publicClient.waitForTransactionReceipt({ hash });
+            setStatus(statusTxConfirmed());
+            votesResult.refetch();
+        } catch (e) {
+            console.error(e);
+            const message = e?.shortMessage || e?.message || 'Delegate failed';
+            setStatus(statusError('status.error', { message }));
         }
+    };
+
+    const handleSubmit = async () => {
+        if (!isConnected || !address) return;
+
+        // Validation Common
         if (chainMismatch) {
             setStatus(statusNetworkMismatch());
             return;
@@ -360,8 +380,6 @@ export default function CreateProposalPage() {
             setStatus(statusNoRpc());
             return;
         }
-
-        // Validate proposal metadata
         if (!proposalTitle.trim()) {
             setStatus(statusError('status.error', { message: 'Proposal title required' }));
             return;
@@ -464,9 +482,6 @@ export default function CreateProposalPage() {
                     calldatas.push(act.calldata || '0x');
                 }
 
-                // Description format: "# Title\n\nDescription" is standard convention for some DAOs, but we can just use the rendered description.
-                // Or better, prefix title to description? Tally often uses the description as markdown which includes the title.
-                // Let's combine: "# Title\n\nDescription"
                 const fullDescription = `# ${proposalTitle}\n\n${proposalDescription}`;
 
                 setStatus(statusTxSubmitted());
@@ -490,167 +505,310 @@ export default function CreateProposalPage() {
         }
     };
 
-    const handleSwitchChain = async () => {
-        if (!targetChainId) return;
-        try {
-            await switchChainAsync({ chainId: Number(targetChainId) });
-        } catch (error) {
-            setStatus(statusNetworkMismatch());
+    // Validation Common
+    if (!isConnected) {
+        setStatus(statusError('airdrop.status.disconnected'));
+        return;
+    }
+    if (chainMismatch) {
+        setStatus(statusNetworkMismatch());
+        return;
+    }
+    if (!publicClient) {
+        setStatus(statusNoRpc());
+        return;
+    }
+
+    // Validate proposal metadata
+    if (!proposalTitle.trim()) {
+        setStatus(statusError('status.error', { message: 'Proposal title required' }));
+        return;
+    }
+
+    try {
+        setStatus(statusLoading());
+
+        if (proposalType === 'bounty') {
+            // --- BOUNTY PROPOSAL LOGIC ---
+            if (!isAddress(escrowAddress)) {
+                setStatus(statusError('status.invalidAddress'));
+                return;
+            }
+            // Validate topics
+            for (const topic of topics) {
+                if (!topic.title.trim()) {
+                    setStatus(statusError('status.error', { message: 'Topic title required' }));
+                    return;
+                }
+                if (!isAddress(topic.owner)) {
+                    setStatus(statusError('status.invalidAddress'));
+                    return;
+                }
+            }
+            // Validate time
+            const start = BigInt(startTime || 0);
+            const end = BigInt(endTime || 0);
+            if (start <= 0 || end <= start) {
+                setStatus(statusError('status.error', { message: 'Invalid voting window' }));
+                return;
+            }
+
+            // 1. Upload Topics to IPFS
+            const contentCids = [];
+            for (const topic of topics) {
+                const topicContent = createTopicContent(
+                    topic.title,
+                    topic.owner,
+                    topic.description
+                );
+                const cid = await uploadToIPFS(topicContent);
+                contentCids.push(cidToBytes32(cid));
+            }
+
+            // 2. Upload Proposal Metadata to IPFS
+            const metadataContent = createTopicContent(
+                proposalTitle,
+                address,
+                proposalDescription,
+                ['proposal-metadata']
+            );
+            const metadataCid = await uploadToIPFS(metadataContent);
+            const proposalMetadataHash = cidToBytes32(metadataCid);
+
+            const topicOwners = topics.map(t => t.owner);
+
+            setStatus(statusTxSubmitted());
+            const hash = await writeContractAsync({
+                address: escrowAddress,
+                abi: ESCROW_ABI,
+                functionName: 'createProposal',
+                args: [topicOwners, contentCids, proposalMetadataHash, start, end],
+            });
+            setLastTxHash(hash);
+            setStatus(statusTxConfirming());
+            await publicClient.waitForTransactionReceipt({ hash });
+            setStatus(statusTxConfirmed());
+
+            setTimeout(() => router.push('/proposals'), 2000);
+
+        } else {
+            // --- GOVERNANCE PROPOSAL LOGIC ---
+            if (!canPropose) {
+                setStatus(statusError('status.error', { message: 'Insufficient voting power to propose' }));
+                return;
+            }
+            if (!isAddress(governorAddress)) {
+                setStatus(statusError('status.error', { message: 'Governor address not configured for this chain' }));
+                return;
+            }
+            if (actions.length === 0) {
+                setStatus(statusError('status.error', { message: 'At least one action is required' }));
+                return;
+            }
+
+            const targets = [];
+            const values = [];
+            const signatures = [];
+            const calldatas = [];
+
+            for (const act of actions) {
+                if (!isAddress(act.target)) {
+                    setStatus(statusError('status.error', { message: `Invalid target address: ${act.target}` }));
+                    return;
+                }
+                targets.push(act.target);
+                values.push(parseEther(act.value || '0'));
+                signatures.push(act.signature || ''); // Standard Governor allows empty sig
+                calldatas.push(act.calldata || '0x');
+            }
+
+            // Description format: "# Title\n\nDescription" is standard convention for some DAOs, but we can just use the rendered description.
+            // Or better, prefix title to description? Tally often uses the description as markdown which includes the title.
+            // Let's combine: "# Title\n\nDescription"
+            const fullDescription = `# ${proposalTitle}\n\n${proposalDescription}`;
+
+            setStatus(statusTxSubmitted());
+            const hash = await writeContractAsync({
+                address: governorAddress,
+                abi: GOVERNOR_ABI,
+                functionName: 'propose',
+                args: [targets, values, signatures, calldatas, fullDescription],
+            });
+            setLastTxHash(hash);
+            setStatus(statusTxConfirming());
+            await publicClient.waitForTransactionReceipt({ hash });
+            setStatus(statusTxConfirmed());
+
+            setTimeout(() => router.push('/proposals'), 2000);
         }
-    };
 
-    const formatGUA = (value) => {
-        if (!value) return '-';
-        return `${(Number(value) / 1e18).toLocaleString()} GUA`;
-    };
+    } catch (error) {
+        const message = error?.shortMessage || error?.message || 'Create failed';
+        setStatus(statusError('status.error', { message }));
+    }
+};
 
-    return (
-        <main className="layout">
-            <section className="panel hero">
-                <div>
-                    <p className="eyebrow">{t('proposals.eyebrow')}</p>
-                    <h1>{t('proposals.create.title')}</h1>
-                    <p className="lede">{t('proposals.create.lede')}</p>
-                    <div className="hero-actions">
-                        <button
-                            className="mode-toggle"
-                            type="button"
-                            onClick={() => setShowAdvanced((c) => !c)}
+const handleSwitchChain = async () => {
+    if (!targetChainId) return;
+    try {
+        await switchChainAsync({ chainId: Number(targetChainId) });
+    } catch (error) {
+        setStatus(statusNetworkMismatch());
+    }
+};
+
+const formatGUA = (value) => {
+    if (!value) return '-';
+    return `${(Number(value) / 1e18).toLocaleString()} GUA`;
+};
+
+return (
+    <main className="layout">
+        <section className="panel hero">
+            <div>
+                <p className="eyebrow">{t('proposals.eyebrow')}</p>
+                <h1>{t('proposals.create.title')}</h1>
+                <p className="lede">{t('proposals.create.lede')}</p>
+                <div className="hero-actions">
+                    <button
+                        className="mode-toggle"
+                        type="button"
+                        onClick={() => setShowAdvanced((c) => !c)}
+                    >
+                        {showAdvanced ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+                    </button>
+                </div>
+            </div>
+            {/* Status Card based on Proposal Type */}
+            <div className="status-card">
+                {proposalType === 'bounty' ? (
+                    <>
+                        <div className="status-row">
+                            <span>{t('proposals.create.deposit')}</span>
+                            <span>
+                                {isOwner ? (
+                                    <span style={{ color: 'var(--accent)' }}>0 GUA (Admin Exempt)</span>
+                                ) : (
+                                    formatGUA(deposit)
+                                )}
+                            </span>
+                        </div>
+                        <div className="status-row">
+                            <span>{t('airdrop.status.wallet')}</span>
+                            <span>{mounted ? (isConnected ? t('airdrop.status.connected') : t('airdrop.status.disconnected')) : '-'}</span>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="status-row">
+                            <span>{t('governance.create.threshold')}</span>
+                            <span>{formatGUA(proposalThreshold)}</span>
+                        </div>
+                        <div className="status-row">
+                            <span>{t('governance.create.votingPower')}</span>
+                            <span style={{ color: canPropose ? 'var(--fg)' : 'var(--error)' }}>
+                                {formatGUA(userVotes)}
+                            </span>
+                        </div>
+                    </>
+                )}
+            </div>
+        </section>
+
+        {/* Proposal Type Selector */}
+        <section className="panel">
+            <h2>{t('governance.create.type')}</h2>
+            <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <button
+                    className={`btn ${proposalType === 'bounty' ? 'primary' : 'ghost'}`}
+                    onClick={() => setProposalType('bounty')}
+                    style={{ justifyContent: 'center' }}
+                >
+                    {t('governance.create.type.bounty')}
+                </button>
+                <button
+                    className={`btn ${proposalType === 'dao' ? 'primary' : 'ghost'}`}
+                    onClick={() => setProposalType('dao')}
+                    style={{ justifyContent: 'center' }}
+                >
+                    {t('governance.create.type.dao')}
+                </button>
+            </div>
+        </section>
+
+        {showAdvanced && (
+            <section className="panel">
+                <h2>{t('proposals.config.network')}</h2>
+                <div className="form-grid">
+                    <label className="field">
+                        <span>{t('proposals.config.network')}</span>
+                        <select
+                            value={targetChainId}
+                            onChange={(event) => setTargetChainId(Number(event.target.value))}
                         >
-                            {showAdvanced ? t('ui.mode.hideAdvanced') : t('ui.mode.showAdvanced')}
+                            {chainOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                    {option.label} ({option.id})
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
+                {chainMismatch && (
+                    <div className="notice">
+                        {t('status.networkMismatch')}
+                        <button
+                            className="btn ghost"
+                            onClick={handleSwitchChain}
+                            disabled={isSwitching}
+                        >
+                            {isSwitching ? t('airdrop.config.switching') : t('airdrop.config.switch')}
                         </button>
                     </div>
-                </div>
-                {/* Status Card based on Proposal Type */}
-                <div className="status-card">
-                    {proposalType === 'bounty' ? (
-                        <>
-                            <div className="status-row">
-                                <span>{t('proposals.create.deposit')}</span>
-                                <span>
-                                    {isOwner ? (
-                                        <span style={{ color: 'var(--accent)' }}>0 GUA (Admin Exempt)</span>
-                                    ) : (
-                                        formatGUA(deposit)
-                                    )}
-                                </span>
-                            </div>
-                            <div className="status-row">
-                                <span>{t('airdrop.status.wallet')}</span>
-                                <span>{mounted ? (isConnected ? t('airdrop.status.connected') : t('airdrop.status.disconnected')) : '-'}</span>
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <div className="status-row">
-                                <span>{t('governance.create.threshold')}</span>
-                                <span>{formatGUA(proposalThreshold)}</span>
-                            </div>
-                            <div className="status-row">
-                                <span>{t('governance.create.votingPower')}</span>
-                                <span style={{ color: canPropose ? 'var(--fg)' : 'var(--error)' }}>
-                                    {formatGUA(userVotes)}
-                                </span>
-                            </div>
-                        </>
-                    )}
-                </div>
+                )}
             </section>
+        )}
 
-            {/* Proposal Type Selector */}
-            <section className="panel">
-                <h2>{t('governance.create.type')}</h2>
-                <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                    <button
-                        className={`btn ${proposalType === 'bounty' ? 'primary' : 'ghost'}`}
-                        onClick={() => setProposalType('bounty')}
-                        style={{ justifyContent: 'center' }}
-                    >
-                        {t('governance.create.type.bounty')}
-                    </button>
-                    <button
-                        className={`btn ${proposalType === 'dao' ? 'primary' : 'ghost'}`}
-                        onClick={() => setProposalType('dao')}
-                        style={{ justifyContent: 'center' }}
-                    >
-                        {t('governance.create.type.dao')}
-                    </button>
-                </div>
-            </section>
-
-            {showAdvanced && (
-                <section className="panel">
-                    <h2>{t('proposals.config.network')}</h2>
-                    <div className="form-grid">
-                        <label className="field">
-                            <span>{t('proposals.config.network')}</span>
-                            <select
-                                value={targetChainId}
-                                onChange={(event) => setTargetChainId(Number(event.target.value))}
-                            >
-                                {chainOptions.map((option) => (
-                                    <option key={option.id} value={option.id}>
-                                        {option.label} ({option.id})
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                    </div>
-                    {chainMismatch && (
-                        <div className="notice">
-                            {t('status.networkMismatch')}
+        {/* Proposal Details (Common) */}
+        <section className="panel">
+            <h2>{t('proposals.create.details')}</h2>
+            <div className="form-grid">
+                <label className="field full">
+                    <span>{t('proposals.create.propTitle')}</span>
+                    <input
+                        value={proposalTitle}
+                        placeholder="e.g. Community Grants Program 2024"
+                        onChange={(e) => setProposalTitle(e.target.value)}
+                        maxLength={100}
+                    />
+                </label>
+                <div className="field full">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span>{t('proposals.create.description')}</span>
+                        <div className="inline-group" style={{ gap: '8px' }}>
                             <button
                                 className="btn ghost"
-                                onClick={handleSwitchChain}
-                                disabled={isSwitching}
+                                style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto' }}
+                                onClick={() => setPreviewProposal(!previewProposal)}
                             >
-                                {isSwitching ? t('airdrop.config.switching') : t('airdrop.config.switch')}
+                                {previewProposal ? t('ui.mode.edit') : t('ui.mode.preview')}
                             </button>
-                        </div>
-                    )}
-                </section>
-            )}
-
-            {/* Proposal Details (Common) */}
-            <section className="panel">
-                <h2>{t('proposals.create.details')}</h2>
-                <div className="form-grid">
-                    <label className="field full">
-                        <span>{t('proposals.create.propTitle')}</span>
-                        <input
-                            value={proposalTitle}
-                            placeholder="e.g. Community Grants Program 2024"
-                            onChange={(e) => setProposalTitle(e.target.value)}
-                            maxLength={100}
-                        />
-                    </label>
-                    <div className="field full">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            <span>{t('proposals.create.description')}</span>
-                            <div className="inline-group" style={{ gap: '8px' }}>
-                                <button
-                                    className="btn ghost"
-                                    style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto' }}
-                                    onClick={() => setPreviewProposal(!previewProposal)}
-                                >
-                                    {previewProposal ? t('ui.mode.edit') : t('ui.mode.preview')}
-                                </button>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-                                    Markdown supported
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Templates */}
-                        <div className="hero-actions" style={{ marginBottom: '12px', marginTop: '-4px' }}>
-                            <span style={{ fontSize: '0.85rem', color: 'var(--muted)', alignSelf: 'center' }}>
-                                {t('proposals.create.templates')}:
+                            <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                                Markdown supported
                             </span>
-                            <button
-                                className="btn ghost"
-                                style={{ padding: '4px 12px', fontSize: '0.8rem' }}
-                                onClick={() => setProposalDescription(
-                                    `# Abstract
+                        </div>
+                    </div>
+
+                    {/* Templates */}
+                    <div className="hero-actions" style={{ marginBottom: '12px', marginTop: '-4px' }}>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--muted)', alignSelf: 'center' }}>
+                            {t('proposals.create.templates')}:
+                        </span>
+                        <button
+                            className="btn ghost"
+                            style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                            onClick={() => setProposalDescription(
+                                `# Abstract
 Brief summary of the proposal.
 
 # Motivation
@@ -658,15 +816,15 @@ Why is this proposal necessary?
 
 # Specification
 Technical details or specific actions.`
-                                )}
-                            >
-                                {t('proposals.create.template.general')}
-                            </button>
-                            <button
-                                className="btn ghost"
-                                style={{ padding: '4px 12px', fontSize: '0.8rem' }}
-                                onClick={() => setProposalDescription(
-                                    `# Project Description
+                            )}
+                        >
+                            {t('proposals.create.template.general')}
+                        </button>
+                        <button
+                            className="btn ghost"
+                            style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                            onClick={() => setProposalDescription(
+                                `# Project Description
 What are you building?
 
 # Use of Funds
@@ -678,366 +836,382 @@ How will the grant be used?
 
 # Team
 Who is working on this?`
-                                )}
-                            >
-                                {t('proposals.create.template.grants')}
-                            </button>
-                        </div>
-                        {/* Editor and Preview (Persist both to keep scroll) */}
-                        <div style={{ display: previewProposal ? 'block' : 'none' }}>
-                            <div className="markdown-preview" style={{
-                                border: '1px solid var(--border)',
-                                borderRadius: '12px',
-                                padding: '16px',
-                                minHeight: '200px',
-                                background: 'var(--input-bg)',
-                                backdropFilter: 'blur(12px)'
-                            }}>
-                                <MarkdownRenderer>
-                                    {proposalDescription || '_No description_'}
-                                </MarkdownRenderer>
-                            </div>
-                        </div>
-                        <div style={{ display: previewProposal ? 'none' : 'block' }}>
-                            <MarkdownEditor
-                                value={proposalDescription}
-                                placeholder="# Summary&#10;Describe your proposal here..."
-                                onChange={(e) => setProposalDescription(e.target.value)}
-                                minRows={10}
-                                maxLength={5000}
-                            />
+                            )}
+                        >
+                            {t('proposals.create.template.grants')}
+                        </button>
+                    </div>
+                    {/* Editor and Preview (Persist both to keep scroll) */}
+                    <div style={{ display: previewProposal ? 'block' : 'none' }}>
+                        <div className="markdown-preview" style={{
+                            border: '1px solid var(--border)',
+                            borderRadius: '12px',
+                            padding: '16px',
+                            minHeight: '200px',
+                            background: 'var(--input-bg)',
+                            backdropFilter: 'blur(12px)'
+                        }}>
+                            <MarkdownRenderer>
+                                {proposalDescription || '_No description_'}
+                            </MarkdownRenderer>
                         </div>
                     </div>
+                    <div style={{ display: previewProposal ? 'none' : 'block' }}>
+                        <MarkdownEditor
+                            value={proposalDescription}
+                            placeholder="# Summary&#10;Describe your proposal here..."
+                            onChange={(e) => setProposalDescription(e.target.value)}
+                            minRows={10}
+                            maxLength={5000}
+                        />
+                    </div>
                 </div>
-            </section >
+            </div>
+        </section >
 
-            {/* --- TOPIC MANAGEMENT (BOUNTY ONLY) --- */}
-            {proposalType === 'bounty' && (
-                <>
-                    < section className="panel" >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                            <h2>{t('proposals.create.topic')} ({topics.length}/5)</h2>
-                        </div>
+        {/* --- TOPIC MANAGEMENT (BOUNTY ONLY) --- */}
+        {proposalType === 'bounty' && (
+            <>
+                < section className="panel" >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                        <h2>{t('proposals.create.topic')} ({topics.length}/5)</h2>
+                    </div>
 
-                        {/* Tabs */}
-                        <div className="hero-actions" style={{ justifyContent: 'flex-start', flexWrap: 'wrap', gap: '8px', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
-                            {topics.map((_, index) => (
-                                <button
-                                    key={index}
-                                    className={`mode-toggle ${activeTopicIndex === index ? 'active' : ''}`}
-                                    onClick={() => setActiveTopicIndex(index)}
-                                >
-                                    {topics[index].title.trim() || `${t('proposals.create.topic')} ${index + 1}`}
-                                </button>
-                            ))}
-                            {topics.length < 5 && (
-                                <button className="btn ghost" onClick={addTopic} style={{ padding: '4px 12px', fontSize: '0.9em' }}>
-                                    + {t('proposals.create.addTopic')}
-                                </button>
-                            )}
-                        </div>
+                    {/* Tabs */}
+                    <div className="hero-actions" style={{ justifyContent: 'flex-start', flexWrap: 'wrap', gap: '8px', marginBottom: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
+                        {topics.map((_, index) => (
+                            <button
+                                key={index}
+                                className={`mode-toggle ${activeTopicIndex === index ? 'active' : ''}`}
+                                onClick={() => setActiveTopicIndex(index)}
+                            >
+                                {topics[index].title.trim() || `${t('proposals.create.topic')} ${index + 1}`}
+                            </button>
+                        ))}
+                        {topics.length < 5 && (
+                            <button className="btn ghost" onClick={addTopic} style={{ padding: '4px 12px', fontSize: '0.9em' }}>
+                                + {t('proposals.create.addTopic')}
+                            </button>
+                        )}
+                    </div>
 
-                        {/* Active Topic Form */}
-                        <div className="form-grid" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', gridColumn: '1 / -1' }}>
-                                <label className="field">
-                                    <span>{t('proposals.create.topicTitle')}</span>
+                    {/* Active Topic Form */}
+                    <div className="form-grid" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', gridColumn: '1 / -1' }}>
+                            <label className="field">
+                                <span>{t('proposals.create.topicTitle')}</span>
+                                <input
+                                    value={topics[activeTopicIndex].title}
+                                    placeholder="Enter topic title..."
+                                    onChange={(e) => updateTopic(activeTopicIndex, 'title', e.target.value)}
+                                    maxLength={100}
+                                />
+                            </label>
+
+                            <label className="field">
+                                <span>{t('proposals.create.topicOwner')}</span>
+                                <div className="inline-group">
                                     <input
-                                        value={topics[activeTopicIndex].title}
-                                        placeholder="Enter topic title..."
-                                        onChange={(e) => updateTopic(activeTopicIndex, 'title', e.target.value)}
-                                        maxLength={100}
+                                        value={topics[activeTopicIndex].owner}
+                                        placeholder="0x..."
+                                        onChange={(e) => updateTopic(activeTopicIndex, 'owner', e.target.value)}
+                                        style={{ flex: 1 }}
                                     />
-                                </label>
-
-                                <label className="field">
-                                    <span>{t('proposals.create.topicOwner')}</span>
-                                    <div className="inline-group">
-                                        <input
-                                            value={topics[activeTopicIndex].owner}
-                                            placeholder="0x..."
-                                            onChange={(e) => updateTopic(activeTopicIndex, 'owner', e.target.value)}
-                                            style={{ flex: 1 }}
-                                        />
-                                        {topics.length > 1 && (
-                                            <button
-                                                className="btn ghost"
-                                                onClick={() => removeTopic(activeTopicIndex)}
-                                                style={{ color: 'var(--error)', padding: '10px 14px', whiteSpace: 'nowrap' }}
-                                                title={t('proposals.create.removeTopic')}
-                                            >
-                                                ✕
-                                            </button>
-                                        )}
-                                    </div>
-                                </label>
-                            </div>
-
-                            <div className="field full">
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                    <span>{t('proposals.create.topicDescription')}</span>
-                                    <div className="inline-group" style={{ gap: '8px' }}>
+                                    {topics.length > 1 && (
                                         <button
                                             className="btn ghost"
-                                            style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto' }}
-                                            onClick={() => setPreviewTopic(!previewTopic)}
+                                            onClick={() => removeTopic(activeTopicIndex)}
+                                            style={{ color: 'var(--error)', padding: '10px 14px', whiteSpace: 'nowrap' }}
+                                            title={t('proposals.create.removeTopic')}
                                         >
-                                            {previewTopic ? t('ui.mode.edit') : t('ui.mode.preview')}
+                                            ✕
                                         </button>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-                                            Markdown supported
-                                        </span>
-                                    </div>
+                                    )}
                                 </div>
-                                <div style={{ display: previewTopic ? 'block' : 'none' }}>
-                                    <div className="markdown-preview" style={{
-                                        border: '1px solid var(--border)',
-                                        borderRadius: '12px',
-                                        padding: '16px',
-                                        minHeight: '200px',
-                                        background: 'var(--input-bg)',
-                                        backdropFilter: 'blur(12px)'
-                                    }}>
-                                        <MarkdownRenderer>
-                                            {topics[activeTopicIndex].description || '_No description_'}
-                                        </MarkdownRenderer>
-                                    </div>
-                                </div>
-                                <div style={{ display: previewTopic ? 'none' : 'block' }}>
-                                    <MarkdownEditor
-                                        value={topics[activeTopicIndex].description}
-                                        placeholder="# Topic Overview&#10;Describe this topic..."
-                                        onChange={(e) => updateTopic(activeTopicIndex, 'description', e.target.value)}
-                                        minRows={10}
-                                        maxLength={5000}
-                                    />
+                            </label>
+                        </div>
+
+                        <div className="field full">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                <span>{t('proposals.create.topicDescription')}</span>
+                                <div className="inline-group" style={{ gap: '8px' }}>
+                                    <button
+                                        className="btn ghost"
+                                        style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto' }}
+                                        onClick={() => setPreviewTopic(!previewTopic)}
+                                    >
+                                        {previewTopic ? t('ui.mode.edit') : t('ui.mode.preview')}
+                                    </button>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                                        Markdown supported
+                                    </span>
                                 </div>
                             </div>
-                        </div>
-                    </section >
-
-                    <section className="panel">
-                        <h2>{t('voting.window.start')} / {t('voting.window.end')}</h2>
-                        <div className="form-grid">
-                            <label className="field full">
-                                <DateTimePicker
-                                    value={startTime}
-                                    onChange={setStartTime}
-                                    label={t('voting.window.start')}
-                                    showShortcuts={true}
+                            <div style={{ display: previewTopic ? 'block' : 'none' }}>
+                                <div className="markdown-preview" style={{
+                                    border: '1px solid var(--border)',
+                                    borderRadius: '12px',
+                                    padding: '16px',
+                                    minHeight: '200px',
+                                    background: 'var(--input-bg)',
+                                    backdropFilter: 'blur(12px)'
+                                }}>
+                                    <MarkdownRenderer>
+                                        {topics[activeTopicIndex].description || '_No description_'}
+                                    </MarkdownRenderer>
+                                </div>
+                            </div>
+                            <div style={{ display: previewTopic ? 'none' : 'block' }}>
+                                <MarkdownEditor
+                                    value={topics[activeTopicIndex].description}
+                                    placeholder="# Topic Overview&#10;Describe this topic..."
+                                    onChange={(e) => updateTopic(activeTopicIndex, 'description', e.target.value)}
+                                    minRows={10}
+                                    maxLength={5000}
                                 />
-                            </label>
-                            <label className="field full">
-                                <DateTimePicker
-                                    value={endTime}
-                                    onChange={setEndTime}
-                                    label={t('voting.window.end')}
-                                    showShortcuts={true}
-                                />
-                            </label>
+                            </div>
                         </div>
-                        <p className="hint">{t('admin.create.help')}</p>
-                    </section>
-                </>
-            )}
-
-            {/* --- DAO ACTIONS (GOVERNANCE ONLY) --- */}
-            {proposalType === 'dao' && (
-                <section className="panel">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                        <h2>{t('governance.actions.title')}</h2>
-                        <button className="btn sm secondary" onClick={addAction}>
-                            + {t('governance.actions.add')}
-                        </button>
                     </div>
+                </section >
 
-                    {actions.map((act, idx) => (
-                        <div key={idx} style={{
-                            marginBottom: '1rem',
-                            border: '1px solid var(--border)',
-                            borderRadius: '8px',
-                            padding: '1rem',
-                            background: 'var(--bg-subtle)'
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                <strong>#{idx + 1}</strong>
-                                <button
-                                    className="btn ghost sm"
-                                    style={{ color: 'var(--error)' }}
-                                    onClick={() => removeAction(idx)}
-                                >
-                                    {t('governance.actions.remove')}
-                                </button>
-                            </div>
-
-                            {/* Action Type Selector */}
-                            <div style={{ marginBottom: '1rem', display: 'flex', gap: '8px' }}>
-                                <button
-                                    className={`btn ${(!act.type || act.type === 'custom') ? 'primary sm' : 'ghost sm'}`}
-                                    onClick={() => handleActionTypeChange(idx, 'custom')}
-                                >
-                                    {t('governance.actions.type.custom')}
-                                </button>
-                                <button
-                                    className={`btn ${act.type === 'native' ? 'primary sm' : 'ghost sm'}`}
-                                    onClick={() => handleActionTypeChange(idx, 'native')}
-                                >
-                                    {t('governance.actions.type.native')}
-                                </button>
-                                <button
-                                    className={`btn ${act.type === 'token' ? 'primary sm' : 'ghost sm'}`}
-                                    onClick={() => handleActionTypeChange(idx, 'token')}
-                                >
-                                    {t('governance.actions.type.token')}
-                                </button>
-                            </div>
-
-                            <div className="form-grid">
-                                {act.type === 'token' ? (
-                                    <>
-                                        <label className="field full">
-                                            <span>{t('governance.actions.tokenAddress')}</span>
-                                            <input
-                                                value={act.tokenAddress || ''}
-                                                onChange={(e) => updateAction(idx, 'tokenAddress', e.target.value)}
-                                                placeholder="0x..."
-                                            />
-                                        </label>
-                                        <label className="field full">
-                                            <span>{t('governance.actions.recipient')}</span>
-                                            <input
-                                                value={act.recipient || ''}
-                                                onChange={(e) => updateAction(idx, 'recipient', e.target.value)}
-                                                placeholder="0x..."
-                                            />
-                                        </label>
-                                        <label className="field">
-                                            <span>{t('governance.actions.amount')}</span>
-                                            <input
-                                                value={act.amount || ''}
-                                                onChange={(e) => updateAction(idx, 'amount', e.target.value)}
-                                                placeholder="100.0"
-                                            />
-                                        </label>
-                                        <label className="field">
-                                            <span>{t('governance.actions.decimals')}</span>
-                                            <input
-                                                value={act.decimals || '18'}
-                                                onChange={(e) => updateAction(idx, 'decimals', e.target.value)}
-                                                type="number"
-                                            />
-                                        </label>
-                                        <label className="field full">
-                                            <span>{t('governance.actions.generatedCalldata')}</span>
-                                            <textarea
-                                                readOnly
-                                                disabled
-                                                rows="2"
-                                                value={act.calldata}
-                                                style={{ fontFamily: 'monospace', fontSize: '0.85em', opacity: 0.7 }}
-                                            />
-                                        </label>
-                                    </>
-                                ) : (
-                                    <>
-                                        <label className="field full">
-                                            <span>{t('governance.actions.target')} (Address)</span>
-                                            <input
-                                                value={act.target}
-                                                onChange={(e) => updateAction(idx, 'target', e.target.value)}
-                                                placeholder="0x..."
-                                            />
-                                        </label>
-                                        <label className="field">
-                                            <span>{t('governance.actions.value')} (ETH)</span>
-                                            <input
-                                                value={act.value}
-                                                onChange={(e) => updateAction(idx, 'value', e.target.value)}
-                                                placeholder="0.0"
-                                                disabled={act.type === 'native' ? false : false} // Just explicitly show it
-                                            />
-                                        </label>
-                                        {act.type !== 'native' && (
-                                            <label className="field full">
-                                                <span>{t('governance.actions.signature')} (Optional)</span>
-                                                <input
-                                                    value={act.signature}
-                                                    onChange={(e) => updateAction(idx, 'signature', e.target.value)}
-                                                    placeholder="e.g. transfer(address,uint256)"
-                                                />
-                                            </label>
-                                        )}
-
-                                        {/* Dynamic Inputs from Signature */}
-                                        {act.abiInputs && act.abiInputs.length > 0 && (
-                                            <div style={{ gridColumn: '1/-1', borderLeft: '2px solid var(--accent)', paddingLeft: '1rem', marginBottom: '0.5rem' }}>
-                                                <p className="hint" style={{ marginBottom: '0.5rem' }}>Auto-detected Parameters:</p>
-                                                {act.abiInputs.map((input, i) => (
-                                                    <label key={i} className="field full" style={{ marginBottom: '0.5rem' }}>
-                                                        <span style={{ fontSize: '0.85em', color: 'var(--muted)' }}>{input.name || `Param #${i + 1}`} ({input.type})</span>
-                                                        <input
-                                                            value={act.args && act.args[i] || ''}
-                                                            onChange={(e) => updateAction(idx, `arg_${i}`, e.target.value)}
-                                                            placeholder={input.type}
-                                                        />
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {act.type !== 'native' && (
-                                            <label className="field full">
-                                                <span>{t('governance.actions.calldata')} (Hex)</span>
-                                                <textarea
-                                                    value={act.calldata}
-                                                    onChange={(e) => updateAction(idx, 'calldata', e.target.value)}
-                                                    placeholder="0x..."
-                                                    style={{ fontFamily: 'monospace', fontSize: '0.85em', minHeight: '60px' }}
-                                                />
-                                            </label>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                    {actions.length === 0 && (
-                        <p className="muted" style={{ textAlign: 'center', padding: '1rem' }}>No actions added.</p>
-                    )}
+                <section className="panel">
+                    <h2>{t('voting.window.start')} / {t('voting.window.end')}</h2>
+                    <div className="form-grid">
+                        <label className="field full">
+                            <DateTimePicker
+                                value={startTime}
+                                onChange={setStartTime}
+                                label={t('voting.window.start')}
+                                showShortcuts={true}
+                            />
+                        </label>
+                        <label className="field full">
+                            <DateTimePicker
+                                value={endTime}
+                                onChange={setEndTime}
+                                label={t('voting.window.end')}
+                                showShortcuts={true}
+                            />
+                        </label>
+                    </div>
+                    <p className="hint">{t('admin.create.help')}</p>
                 </section>
-            )}
+            </>
+        )}
 
+        {/* --- DAO ACTIONS (GOVERNANCE ONLY) --- */}
+        {proposalType === 'dao' && (
             <section className="panel">
-                <h2>{t('proposals.create.submit')}</h2>
-                <div className="actions">
-                    {needsApproval && (
-                        <button
-                            className="btn ghost"
-                            onClick={handleApprove}
-                            disabled={isSubmitting}
-                        >
-                            {t('voting.approve')} {formatGUA(deposit)}
-                        </button>
-                    )}
-                    <button
-                        className="btn primary"
-                        onClick={handleSubmit}
-                        disabled={isSubmitting || needsApproval}
-                    >
-                        {isSubmitting ? t('proposals.create.submitting') : t('proposals.create.submit')}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                    <h2>{t('governance.actions.title')}</h2>
+                    <button className="btn sm secondary" onClick={addAction}>
+                        + {t('governance.actions.add')}
                     </button>
                 </div>
-                <StatusNotice status={status} />
-                {lastTxHash && (
-                    <div className="status-row">
-                        <span>{t('status.tx.latest')}</span>
-                        <span className="inline-group">
-                            {lastTxHash.slice(0, 10)}...
-                            <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
-                        </span>
+
+                {actions.map((act, idx) => (
+                    <div key={idx} style={{
+                        marginBottom: '1rem',
+                        border: '1px solid var(--border)',
+                        borderRadius: '8px',
+                        padding: '1rem',
+                        background: 'var(--bg-subtle)'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <strong>#{idx + 1}</strong>
+                            <button
+                                className="btn ghost sm"
+                                style={{ color: 'var(--error)' }}
+                                onClick={() => removeAction(idx)}
+                            >
+                                {t('governance.actions.remove')}
+                            </button>
+                        </div>
+
+                        {/* Action Type Selector */}
+                        <div style={{ marginBottom: '1rem', display: 'flex', gap: '8px' }}>
+                            <button
+                                className={`btn ${(!act.type || act.type === 'custom') ? 'primary sm' : 'ghost sm'}`}
+                                onClick={() => handleActionTypeChange(idx, 'custom')}
+                            >
+                                {t('governance.actions.type.custom')}
+                            </button>
+                            <button
+                                className={`btn ${act.type === 'native' ? 'primary sm' : 'ghost sm'}`}
+                                onClick={() => handleActionTypeChange(idx, 'native')}
+                            >
+                                {t('governance.actions.type.native')}
+                            </button>
+                            <button
+                                className={`btn ${act.type === 'token' ? 'primary sm' : 'ghost sm'}`}
+                                onClick={() => handleActionTypeChange(idx, 'token')}
+                            >
+                                {t('governance.actions.type.token')}
+                            </button>
+                        </div>
+
+                        <div className="form-grid">
+                            {act.type === 'token' ? (
+                                <>
+                                    <label className="field full">
+                                        <span>{t('governance.actions.tokenAddress')}</span>
+                                        <input
+                                            value={act.tokenAddress || ''}
+                                            onChange={(e) => updateAction(idx, 'tokenAddress', e.target.value)}
+                                            placeholder="0x..."
+                                        />
+                                    </label>
+                                    <label className="field full">
+                                        <span>{t('governance.actions.recipient')}</span>
+                                        <input
+                                            value={act.recipient || ''}
+                                            onChange={(e) => updateAction(idx, 'recipient', e.target.value)}
+                                            placeholder="0x..."
+                                        />
+                                    </label>
+                                    <label className="field">
+                                        <span>{t('governance.actions.amount')}</span>
+                                        <input
+                                            value={act.amount || ''}
+                                            onChange={(e) => updateAction(idx, 'amount', e.target.value)}
+                                            placeholder="100.0"
+                                        />
+                                    </label>
+                                    <label className="field">
+                                        <span>{t('governance.actions.decimals')}</span>
+                                        <input
+                                            value={act.decimals || '18'}
+                                            onChange={(e) => updateAction(idx, 'decimals', e.target.value)}
+                                            type="number"
+                                        />
+                                    </label>
+                                    <label className="field full">
+                                        <span>{t('governance.actions.generatedCalldata')}</span>
+                                        <textarea
+                                            readOnly
+                                            disabled
+                                            rows="2"
+                                            value={act.calldata}
+                                            style={{ fontFamily: 'monospace', fontSize: '0.85em', opacity: 0.7 }}
+                                        />
+                                    </label>
+                                </>
+                            ) : (
+                                <>
+                                    <label className="field full">
+                                        <span>{t('governance.actions.target')} (Address)</span>
+                                        <input
+                                            value={act.target}
+                                            onChange={(e) => updateAction(idx, 'target', e.target.value)}
+                                            placeholder="0x..."
+                                        />
+                                    </label>
+                                    <label className="field">
+                                        <span>{t('governance.actions.value')} (ETH)</span>
+                                        <input
+                                            value={act.value}
+                                            onChange={(e) => updateAction(idx, 'value', e.target.value)}
+                                            placeholder="0.0"
+                                            disabled={act.type === 'native' ? false : false} // Just explicitly show it
+                                        />
+                                    </label>
+                                    {act.type !== 'native' && (
+                                        <label className="field full">
+                                            <span>{t('governance.actions.signature')} (Optional)</span>
+                                            <input
+                                                value={act.signature}
+                                                onChange={(e) => updateAction(idx, 'signature', e.target.value)}
+                                                placeholder="e.g. transfer(address,uint256)"
+                                            />
+                                        </label>
+                                    )}
+
+                                    {/* Dynamic Inputs from Signature */}
+                                    {act.abiInputs && act.abiInputs.length > 0 && (
+                                        <div style={{ gridColumn: '1/-1', borderLeft: '2px solid var(--accent)', paddingLeft: '1rem', marginBottom: '0.5rem' }}>
+                                            <p className="hint" style={{ marginBottom: '0.5rem' }}>Auto-detected Parameters:</p>
+                                            {act.abiInputs.map((input, i) => (
+                                                <label key={i} className="field full" style={{ marginBottom: '0.5rem' }}>
+                                                    <span style={{ fontSize: '0.85em', color: 'var(--muted)' }}>{input.name || `Param #${i + 1}`} ({input.type})</span>
+                                                    <input
+                                                        value={act.args && act.args[i] || ''}
+                                                        onChange={(e) => updateAction(idx, `arg_${i}`, e.target.value)}
+                                                        placeholder={input.type}
+                                                    />
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {act.type !== 'native' && (
+                                        <label className="field full">
+                                            <span>{t('governance.actions.calldata')} (Hex)</span>
+                                            <textarea
+                                                value={act.calldata}
+                                                onChange={(e) => updateAction(idx, 'calldata', e.target.value)}
+                                                placeholder="0x..."
+                                                style={{ fontFamily: 'monospace', fontSize: '0.85em', minHeight: '60px' }}
+                                            />
+                                        </label>
+                                    )}
+                                </>
+                            )}
+                        </div>
                     </div>
+                ))}
+                {actions.length === 0 && (
+                    <p className="muted" style={{ textAlign: 'center', padding: '1rem' }}>No actions added.</p>
                 )}
             </section>
-        </main >
-    );
+        )}
+
+        <section className="panel">
+            <h2>{t('proposals.create.submit')}</h2>
+
+            {proposalType === 'dao' && !canPropose && (
+                <div className="notice warning" style={{ marginBottom: '1rem', border: '1px solid orange', padding: '1rem', borderRadius: '4px' }}>
+                    <p style={{ marginBottom: '0.5rem' }}>
+                        <strong>{t('governance.warning.delegateCheck')}</strong>
+                        <br />
+                        <span className="muted" style={{ fontSize: '0.9em' }}>
+                            Required: {formatGUA(proposalThreshold)} Votes. You have: {formatGUA(userVotes)}.
+                        </span>
+                    </p>
+                    <button className="btn primary sm" onClick={handleDelegate} disabled={isSubmitting}>
+                        {t('governance.delegate.action')}
+                    </button>
+                </div>
+            )}
+
+            <div className="actions">
+                {needsApproval && (
+                    <button
+                        className="btn ghost"
+                        onClick={handleApprove}
+                        disabled={isSubmitting}
+                    >
+                        {t('voting.approve')} {formatGUA(deposit)}
+                    </button>
+                )}
+                <button
+                    className="btn primary"
+                    onClick={handleSubmit}
+                    disabled={isSubmitting || needsApproval || (proposalType === 'dao' && !canPropose)}
+                >
+                    {isSubmitting ? t('proposals.create.submitting') : t('proposals.create.submit')}
+                </button>
+            </div>
+            <StatusNotice status={status} />
+            {lastTxHash && (
+                <div className="status-row">
+                    <span>{t('status.tx.latest')}</span>
+                    <span className="inline-group">
+                        {lastTxHash.slice(0, 10)}...
+                        <ExplorerLink chainId={chainId} type="tx" value={lastTxHash} />
+                    </span>
+                </div>
+            )}
+        </section>
+    </main >
+);
 }

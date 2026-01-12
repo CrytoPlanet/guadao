@@ -733,13 +733,21 @@ export default function ProposalDetailPage() {
             <span>{t('voting.window.end')}</span>
             <span>{formatDateTime(endTime)}</span>
           </div>
-          <div className="status-row">
-            <span>{t('escrow.summary.winner')}</span>
-            <span className="inline-group">
-              {shortAddress(readField(winnerTopicResult.data, 'owner', 0))}
-              <CopyButton value={readField(winnerTopicResult.data, 'owner', 0)} />
-            </span>
-          </div>
+          {(() => {
+            const winnerAddr = readField(winnerTopicResult.data, 'owner', 0);
+            if (proposalStatusValue > 1 && winnerAddr && winnerAddr !== '0x0000000000000000000000000000000000000000') {
+              return (
+                <div className="status-row">
+                  <span>{t('escrow.summary.winner')}</span>
+                  <span className="inline-group">
+                    {shortAddress(winnerAddr)}
+                    <CopyButton value={winnerAddr} />
+                  </span>
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
       </section>
 

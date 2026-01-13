@@ -512,8 +512,23 @@ export default function ProposalDetailPage() {
         const hash = await fn();
         if (hash) setLastTxHash(hash);
         setStatus(statusTxConfirming());
-        await publicClient.waitForTransactionReceipt({ hash });
-        setStatus(statusTxConfirmed());
+        try {
+          await publicClient.waitForTransactionReceipt({ hash });
+          setStatus(statusTxConfirmed());
+        } catch (receiptError) {
+          console.warn("Wait for receipt failed or timed out:", receiptError);
+          // If it's a timeout, we treat it as a warning but still try to refresh
+          if (receiptError?.message?.includes("Timed out") || receiptError?.name === 'TimeoutError') {
+            // Keep status as confirming or set to a specific "check explorer" state
+            // For now, let's leave it as confirming or set it to loaded so they can see the data update
+            // But technically we don't know if it confirmed.
+            // Best approach: Just proceed to refetch.
+            setStatus(statusTxSubmitted()); // Revert to submitted state or null?
+            // Actually, if we refetch and the data changed, the status update below will handle it.
+          } else {
+            throw receiptError; // Re-throw real errors
+          }
+        }
 
         // Refresh all data
         await Promise.all([
@@ -523,6 +538,12 @@ export default function ProposalDetailPage() {
           winnerTopicResult.refetch(),
           fetchEvents(),
         ]);
+
+        // If data updated successfully, we might want to reset status to ready
+        // But statusTxConfirmed leaves a success message.
+        // If we had a timeout, we definitely want to see the new data.
+        setStatus((prev) => (prev.kind === 'txConfirmed' ? prev : statusLoaded()));
+
 
       } catch (error) {
         console.error("RunAction Error:", error);

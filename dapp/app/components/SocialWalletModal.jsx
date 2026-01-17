@@ -197,16 +197,17 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                     </div>
 
                     {['google', 'twitter', 'discord', 'email', 'github', 'wallet'].map((provider) => {
-                        const linkedAccount = user?.linkedAccounts?.find(a => a.type === provider);
-                        // For wallet, strict check to avoid confusing the embedded wallet with linked external wallet?
-                        // Privy usually types embedded wallet as 'wallet'.
-                        // Wait! user.wallet (embedded) has connectorType 'embedded'.
-                        // Linked external wallets have connectorType 'injected' etc.
-                        // linkedAccounts array includes ALL linked identities.
-                        // Embedded wallet is an identity too?
-                        // Actually, 'wallet' type in linkedAccounts usually refers to external ones or the one used to login.
-                        // Let's rely on standard check.
+                        // Map simple provider names to Privy account types
+                        const typeMap = {
+                            google: 'google_oauth',
+                            twitter: 'twitter_oauth',
+                            discord: 'discord_oauth',
+                            github: 'github_oauth',
+                            email: 'email',
+                            wallet: 'wallet'
+                        };
 
+                        const linkedAccount = user?.linkedAccounts?.find(a => a.type === typeMap[provider]);
                         const isLinked = !!linkedAccount;
                         const { link, unlink, icon } = getLinkMethods(provider);
 
@@ -216,6 +217,7 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                             if (acc.email) return acc.email;
                             if (acc.username) return `@${acc.username}`;
                             if (acc.name) return acc.name;
+                            if (acc.type === 'wallet' && acc.address) return `${acc.address.slice(0, 6)}...`;
                             if (acc.subject) return `${acc.subject.slice(0, 6)}...`;
                             return 'Linked';
                         };
@@ -246,7 +248,11 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                                             {accountName}
                                         </span>
                                         <button
-                                            onClick={() => unlink(linkedAccount.subject)}
+                                            onClick={() => {
+                                                const target = provider === 'wallet' ? linkedAccount.address : linkedAccount.subject;
+                                                console.log('Unlinking', provider, target);
+                                                unlink(target);
+                                            }}
                                             title={t('wallet.unlink')}
                                             style={{
                                                 border: 'none',

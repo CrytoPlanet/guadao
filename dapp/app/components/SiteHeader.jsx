@@ -18,6 +18,7 @@ export default function SiteHeader() {
   const { lang, setLang, t } = useI18n();
   const { isAdmin } = useAdmin();
   const { theme, toggleTheme, mounted } = useTheme();
+  const { login, exportWallet, authenticated, ready, user: privyUser } = usePrivy();
 
   const [isVisible, setIsVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
@@ -88,8 +89,6 @@ export default function SiteHeader() {
         </button>
         <ConnectButton.Custom>
           {({ account, openConnectModal, openAccountModal }) => {
-            const { login, exportWallet, authenticated, ready, user: privyUser } = usePrivy();
-
             // 如果通过 Privy 登录了但没有链接 Wagmi
             if (authenticated && !account) {
               // 理想情况下这里应该同步钱包，但作为演示先显示 Privy 状态

@@ -6,7 +6,16 @@ import { useAccount, useBalance } from 'wagmi';
 import { useI18n } from './LanguageProvider';
 
 export default function SocialWalletModal({ isOpen, onClose }) {
-    const { user, logout, exportWallet } = usePrivy();
+    const {
+        user,
+        logout,
+        exportWallet,
+        linkGoogle, unlinkGoogle,
+        linkTwitter, unlinkTwitter,
+        linkDiscord, unlinkDiscord,
+        linkEmail, unlinkEmail,
+        linkGithub, unlinkGithub
+    } = usePrivy();
     const { t } = useI18n();
     const modalRef = useRef(null);
 
@@ -38,6 +47,18 @@ export default function SocialWalletModal({ isOpen, onClose }) {
         if (address) {
             navigator.clipboard.writeText(address);
             // Could verify copy success
+        }
+    };
+
+    // Helper for dynamic access
+    const getLinkMethods = (provider) => {
+        switch (provider) {
+            case 'google': return { link: linkGoogle, unlink: unlinkGoogle, icon: '🇬' };
+            case 'twitter': return { link: linkTwitter, unlink: unlinkTwitter, icon: '🐦' };
+            case 'discord': return { link: linkDiscord, unlink: unlinkDiscord, icon: '👾' };
+            case 'email': return { link: linkEmail, unlink: unlinkEmail, icon: '📧' };
+            case 'github': return { link: linkGithub, unlink: unlinkGithub, icon: '🐱' };
+            default: return {};
         }
     };
 
@@ -152,6 +173,77 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                             {balance ? `${parseFloat(balance.formatted).toFixed(4)} ${balance.symbol}` : '...'}
                         </span>
                     </div>
+                </div>
+
+                {/* Account Management Section */}
+                <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    padding: '16px',
+                    background: 'var(--bg-secondary, #f5f5f5)',
+                    borderRadius: '16px'
+                }}>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '4px' }}>
+                        {t('wallet.account_management')}
+                    </div>
+
+                    {['google', 'twitter', 'discord', 'email', 'github'].map((provider) => {
+                        const linkedAccount = user?.linkedAccounts?.find(a => a.type === provider);
+                        const isLinked = !!linkedAccount;
+                        const { link, unlink, icon } = getLinkMethods(provider);
+
+                        return (
+                            <div key={provider} style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                fontSize: '0.85rem'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>{icon}</span>
+                                    <span>{t(`wallet.${provider}`)}</span>
+                                    {isLinked && (
+                                        <span style={{
+                                            fontSize: '0.75rem',
+                                            color: 'var(--green-500, #10b981)',
+                                            background: 'rgba(16, 185, 129, 0.1)',
+                                            padding: '2px 6px',
+                                            borderRadius: '4px'
+                                        }}>
+                                            {linkedAccount.address || linkedAccount.email || linkedAccount.username || linkedAccount.name || t('wallet.linked')}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        // Check if it's the last linked account logic usually handled by Privy SDK error
+                                        if (isLinked) {
+                                            // Pass type-specific subject if needed, but SDK usually takes subject
+                                            // Actually unlinkGoogle takes 'subject' (the address/email/id)
+                                            unlink(linkedAccount.address || linkedAccount.email || linkedAccount.username || linkedAccount.subject);
+                                        } else {
+                                            link();
+                                        }
+                                    }}
+                                    disabled={!isLinked && provider === 'email'}
+                                    style={{
+                                        border: '1px solid var(--border-color, #e5e5e5)',
+                                        background: isLinked ? 'transparent' : 'var(--primary, #3b82f6)',
+                                        color: isLinked ? 'var(--text-secondary, #666)' : '#fff',
+                                        borderRadius: '6px',
+                                        padding: '4px 10px',
+                                        cursor: 'pointer',
+                                        fontSize: '0.8rem',
+                                        opacity: (!isLinked && provider === 'email') ? 0.5 : 1
+                                    }}
+                                >
+                                    {isLinked ? t('wallet.unlink') : t('wallet.link')}
+                                </button>
+                            </div>
+                        );
+                    })}
                 </div>
 
                 {/* Actions Grid */}

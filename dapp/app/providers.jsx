@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { WagmiProvider, useAccount } from 'wagmi';
+import { WagmiProvider, usePrivyWagmi } from '@privy-io/wagmi';
+import { useAccount } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PrivyProvider, usePrivy, useWallets } from '@privy-io/react-auth';
-import { usePrivyWagmi } from '@privy-io/wagmi';
 import '@rainbow-me/rainbowkit/styles.css';
 import { RainbowKitProvider, lightTheme, darkTheme } from '@rainbow-me/rainbowkit';
 import { base, baseSepolia } from 'viem/chains';

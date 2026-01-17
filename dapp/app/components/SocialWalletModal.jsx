@@ -207,7 +207,14 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                             wallet: 'wallet'
                         };
 
-                        const linkedAccount = user?.linkedAccounts?.find(a => a.type === typeMap[provider]);
+                        const linkedAccount = user?.linkedAccounts?.find(a => {
+                            if (provider === 'wallet') {
+                                // Exclude embedded wallets from "External Wallet" list
+                                return a.type === 'wallet' && a.connectorType !== 'embedded';
+                            }
+                            return a.type === typeMap[provider];
+                        });
+
                         const isLinked = !!linkedAccount;
                         const { link, unlink, icon } = getLinkMethods(provider);
 
@@ -248,10 +255,15 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                                             {accountName}
                                         </span>
                                         <button
-                                            onClick={() => {
-                                                const target = provider === 'wallet' ? linkedAccount.address : linkedAccount.subject;
-                                                console.log('Unlinking', provider, target);
-                                                unlink(target);
+                                            onClick={async () => {
+                                                try {
+                                                    const target = provider === 'wallet' ? linkedAccount.address : linkedAccount.subject;
+                                                    console.log('Unlinking', provider, target);
+                                                    await unlink(target);
+                                                } catch (error) {
+                                                    console.error('Unlink failed:', error);
+                                                    alert(t('wallet.unlink_failed') || 'Unlink failed: You cannot remove your only login method.');
+                                                }
                                             }}
                                             title={t('wallet.unlink')}
                                             style={{
@@ -269,9 +281,13 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                                     </div>
                                 ) : (
                                     <button
-                                        onClick={() => {
-                                            console.log('Linking', provider);
-                                            link();
+                                        onClick={async () => {
+                                            try {
+                                                console.log('Linking', provider);
+                                                await link();
+                                            } catch (error) {
+                                                console.error('Link failed:', error);
+                                            }
                                         }}
                                         disabled={provider === 'email'}
                                         style={{

@@ -11,6 +11,7 @@ import { useAdmin } from './AdminProvider';
 import NetworkStatus from './NetworkStatus';
 import TokenBalance from '../../components/TokenBalance';
 import { useTheme } from '../components/ThemeProvider';
+import SocialWalletModal from './SocialWalletModal';
 import config from '../../config.json';
 
 export default function SiteHeader() {
@@ -18,11 +19,12 @@ export default function SiteHeader() {
   const { lang, setLang, t } = useI18n();
   const { isAdmin } = useAdmin();
   const { theme, toggleTheme, mounted } = useTheme();
-  const { login, exportWallet, authenticated, ready, user: privyUser } = usePrivy();
+  const { login, logout, exportWallet, authenticated, ready, user: privyUser } = usePrivy();
 
   const [isVisible, setIsVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [isAtTop, setIsAtTop] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -91,26 +93,28 @@ export default function SiteHeader() {
           {({ account, openConnectModal, openAccountModal }) => {
             // 如果通过 Privy 登录了但没有链接 Wagmi
             if (authenticated && !account) {
-              // 理想情况下这里应该同步钱包，但作为演示先显示 Privy 状态
+              const displayAddress = privyUser?.wallet?.address;
+              const displayName = privyUser?.email?.address || (displayAddress ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}` : t('wallet.social_user'));
+
               return (
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <button className="btn primary" onClick={() => {
-                    // Privy Logout logic usually here
-                  }}>
-                    {privyUser?.email?.address || privyUser?.wallet?.address?.slice(0, 6) || 'Social User'}
-                  </button>
-                  {/* 导出私钥按钮 */}
+                  {/* Social Profile Button (Opens Modal) */}
                   <button
-                    className="btn ghost"
-                    onClick={exportWallet}
-                    style={{ fontSize: '0.8em', padding: '4px 8px' }}
-                    title={t('wallet.export_key')}
+                    className="btn primary"
+                    onClick={() => setIsModalOpen(true)}
+                    title={t('wallet.social_user')}
+                    style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}
                   >
-                    🔑
+                    <span style={{ fontSize: '1.2em' }}>👻</span>
+                    {displayName}
+                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>▼</span>
                   </button>
+
+                  <SocialWalletModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+
                   {/* 仍允许连接传统钱包 */}
                   <button className="btn ghost" onClick={openConnectModal}>
-                    Connect Wallet
+                    {t('wallet.connect')}
                   </button>
                 </div>
               )

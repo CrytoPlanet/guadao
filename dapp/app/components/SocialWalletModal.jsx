@@ -14,7 +14,8 @@ export default function SocialWalletModal({ isOpen, onClose }) {
         linkTwitter, unlinkTwitter,
         linkDiscord, unlinkDiscord,
         linkEmail, unlinkEmail,
-        linkGithub, unlinkGithub
+        linkGithub, unlinkGithub,
+        linkWallet, unlinkWallet
     } = usePrivy();
     const { t } = useI18n();
     const modalRef = useRef(null);
@@ -26,17 +27,21 @@ export default function SocialWalletModal({ isOpen, onClose }) {
         address: address,
     });
 
-    // Close on click outside
+    // Close on click outside & Lock Scroll
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (modalRef.current && !modalRef.current.contains(event.target)) {
                 onClose();
             }
         };
+
         if (isOpen) {
+            document.body.style.overflow = 'hidden';
             document.addEventListener('mousedown', handleClickOutside);
         }
+
         return () => {
+            document.body.style.overflow = '';
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [isOpen, onClose]);
@@ -58,6 +63,7 @@ export default function SocialWalletModal({ isOpen, onClose }) {
             case 'discord': return { link: linkDiscord, unlink: unlinkDiscord, icon: '👾' };
             case 'email': return { link: linkEmail, unlink: unlinkEmail, icon: '📧' };
             case 'github': return { link: linkGithub, unlink: unlinkGithub, icon: '🐱' };
+            case 'wallet': return { link: linkWallet, unlink: unlinkWallet, icon: '👛' };
             default: return {};
         }
     };
@@ -71,7 +77,7 @@ export default function SocialWalletModal({ isOpen, onClose }) {
             height: '100vh',
             backgroundColor: 'rgba(0, 0, 0, 0.5)',
             backdropFilter: 'blur(4px)',
-            zIndex: 1000,
+            zIndex: 9999, // Increased z-index
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -86,6 +92,8 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                     padding: '24px',
                     width: '360px',
                     maxWidth: '90vw',
+                    maxHeight: '90vh', // Prevent overflow on small screens
+                    overflowY: 'auto',
                     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
                     color: 'var(--text-color, #000)',
                     display: 'flex',
@@ -188,10 +196,30 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                         {t('wallet.account_management')}
                     </div>
 
-                    {['google', 'twitter', 'discord', 'email', 'github'].map((provider) => {
+                    {['google', 'twitter', 'discord', 'email', 'github', 'wallet'].map((provider) => {
                         const linkedAccount = user?.linkedAccounts?.find(a => a.type === provider);
+                        // For wallet, strict check to avoid confusing the embedded wallet with linked external wallet?
+                        // Privy usually types embedded wallet as 'wallet'.
+                        // Wait! user.wallet (embedded) has connectorType 'embedded'.
+                        // Linked external wallets have connectorType 'injected' etc.
+                        // linkedAccounts array includes ALL linked identities.
+                        // Embedded wallet is an identity too?
+                        // Actually, 'wallet' type in linkedAccounts usually refers to external ones or the one used to login.
+                        // Let's rely on standard check.
+
                         const isLinked = !!linkedAccount;
                         const { link, unlink, icon } = getLinkMethods(provider);
+
+                        // Helper to get display name
+                        const getAccountName = (acc) => {
+                            if (!acc) return '';
+                            if (acc.email) return acc.email;
+                            if (acc.username) return `@${acc.username}`;
+                            if (acc.name) return acc.name;
+                            if (acc.subject) return `${acc.subject.slice(0, 6)}...`;
+                            return 'Linked';
+                        };
+                        const accountName = getAccountName(linkedAccount);
 
                         return (
                             <div key={provider} style={{
@@ -203,44 +231,57 @@ export default function SocialWalletModal({ isOpen, onClose }) {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     <span>{icon}</span>
                                     <span>{t(`wallet.${provider}`)}</span>
-                                    {isLinked && (
-                                        <span style={{
-                                            fontSize: '0.75rem',
-                                            color: 'var(--green-500, #10b981)',
-                                            background: 'rgba(16, 185, 129, 0.1)',
-                                            padding: '2px 6px',
-                                            borderRadius: '4px'
-                                        }}>
-                                            {linkedAccount.address || linkedAccount.email || linkedAccount.username || linkedAccount.name || t('wallet.linked')}
-                                        </span>
-                                    )}
                                 </div>
 
-                                <button
-                                    onClick={() => {
-                                        // Check if it's the last linked account logic usually handled by Privy SDK error
-                                        if (isLinked) {
-                                            // Pass type-specific subject if needed, but SDK usually takes subject
-                                            // Actually unlinkGoogle takes 'subject' (the address/email/id)
-                                            unlink(linkedAccount.address || linkedAccount.email || linkedAccount.username || linkedAccount.subject);
-                                        } else {
+                                {isLinked ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{
+                                            fontSize: '0.75rem',
+                                            color: 'var(--text-secondary, #666)',
+                                            maxWidth: '100px',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {accountName}
+                                        </span>
+                                        <button
+                                            onClick={() => unlink(linkedAccount.subject)}
+                                            title={t('wallet.unlink')}
+                                            style={{
+                                                border: 'none',
+                                                background: 'rgba(255, 0, 0, 0.1)',
+                                                color: 'var(--red-500, #ef4444)',
+                                                borderRadius: '4px',
+                                                padding: '4px 8px',
+                                                cursor: 'pointer',
+                                                fontSize: '0.75rem',
+                                            }}
+                                        >
+                                            {t('wallet.unlink')}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => {
+                                            console.log('Linking', provider);
                                             link();
-                                        }
-                                    }}
-                                    disabled={!isLinked && provider === 'email'}
-                                    style={{
-                                        border: '1px solid var(--border-color, #e5e5e5)',
-                                        background: isLinked ? 'transparent' : 'var(--primary, #3b82f6)',
-                                        color: isLinked ? 'var(--text-secondary, #666)' : '#fff',
-                                        borderRadius: '6px',
-                                        padding: '4px 10px',
-                                        cursor: 'pointer',
-                                        fontSize: '0.8rem',
-                                        opacity: (!isLinked && provider === 'email') ? 0.5 : 1
-                                    }}
-                                >
-                                    {isLinked ? t('wallet.unlink') : t('wallet.link')}
-                                </button>
+                                        }}
+                                        disabled={provider === 'email'}
+                                        style={{
+                                            border: '1px solid var(--border-color, #e5e5e5)',
+                                            background: 'var(--primary, #3b82f6)',
+                                            color: '#fff',
+                                            borderRadius: '6px',
+                                            padding: '4px 10px',
+                                            cursor: 'pointer',
+                                            fontSize: '0.8rem',
+                                            opacity: provider === 'email' ? 0.5 : 1
+                                        }}
+                                    >
+                                        {t('wallet.link')}
+                                    </button>
+                                )}
                             </div>
                         );
                     })}

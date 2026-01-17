@@ -91,10 +91,13 @@ export default function SiteHeader() {
         </button>
         <ConnectButton.Custom>
           {({ account, openConnectModal, openAccountModal }) => {
-            // 如果通过 Privy 登录了但没有链接 Wagmi
-            if (authenticated && !account) {
+            // 只要登录了 Privy，就显示自定义 UI
+            if (authenticated) {
               const displayAddress = privyUser?.wallet?.address;
               const displayName = privyUser?.email?.address || (displayAddress ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}` : t('wallet.social_user'));
+
+              // Check if Wagmi is synced to the SAME wallet
+              const isWagmiSynced = account && displayAddress && account.address.toLowerCase() === displayAddress.toLowerCase();
 
               return (
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -112,10 +115,15 @@ export default function SiteHeader() {
 
                   <SocialWalletModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
 
-                  {/* 仍允许连接传统钱包 */}
-                  <button className="btn ghost" onClick={openConnectModal}>
-                    {t('wallet.connect')}
-                  </button>
+                  {/* 仅当 Wagmi 未同步或连接了不同钱包时，才显示连接按钮 */}
+                  {(!isWagmiSynced) && (
+                    <button
+                      className="btn ghost"
+                      onClick={account ? openAccountModal : openConnectModal}
+                    >
+                      {t('wallet.connect')}
+                    </button>
+                  )}
                 </div>
               )
             }

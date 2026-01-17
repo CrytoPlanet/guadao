@@ -25,8 +25,14 @@ function WalletSync() {
   const { setActiveWallet } = usePrivyWagmi();
 
   useEffect(() => {
+    // Force sync if authenticated but not connected in Wagmi
     if (ready && authenticated && !isConnected && wallets.length > 0) {
-      setActiveWallet(wallets[0]);
+      // Find the embedded wallet (type 'privy') or default to first
+      const privyWallet = wallets.find((w) => w.walletClientType === 'privy');
+      const targetWallet = privyWallet || wallets[0];
+
+      console.log('WalletSync: Syncing Privy wallet to Wagmi', targetWallet);
+      setActiveWallet(targetWallet);
     }
   }, [ready, authenticated, isConnected, wallets, setActiveWallet]);
 

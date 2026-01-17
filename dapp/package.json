@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@privy-io/react-auth": "^3.11.0",
+    "@privy-io/wagmi": "^3.0.0",
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@tanstack/react-query": "^5.51.1",
     "@uiw/react-md-editor": "^4.0.11",

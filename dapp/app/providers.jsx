@@ -1,15 +1,37 @@
 "use client";
 
-import { useState } from 'react';
-import { WagmiProvider } from 'wagmi';
+import { useState, useEffect } from 'react';
+import { WagmiProvider, useAccount } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { PrivyProvider, usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivyWagmi } from '@privy-io/wagmi';
 import '@rainbow-me/rainbowkit/styles.css';
 import { RainbowKitProvider, lightTheme, darkTheme } from '@rainbow-me/rainbowkit';
+import { base, baseSepolia } from 'viem/chains';
 
 import { config } from '../lib/wagmi';
 import { LanguageProvider, useI18n } from './components/LanguageProvider';
 import { AdminProvider } from './components/AdminProvider';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
+import { reconnect } from '@wagmi/core';
+
+/**
+ * Syncs Privy wallet with Wagmi
+ */
+function WalletSync() {
+  const { isConnected } = useAccount();
+  const { authenticated, ready } = usePrivy();
+  const { wallets } = useWallets();
+  const { setActiveWallet } = usePrivyWagmi();
+
+  useEffect(() => {
+    if (ready && authenticated && !isConnected && wallets.length > 0) {
+      setActiveWallet(wallets[0]);
+    }
+  }, [ready, authenticated, isConnected, wallets, setActiveWallet]);
+
+  return null;
+}
 
 /**
  * GUA Themes
@@ -23,8 +45,6 @@ const customTheme = (baseTheme) => ({
   }),
   colors: {
     ...baseTheme().colors,
-    // Add custom overrides if needed, similar to previous guaPurpleTheme
-    // For now using default RainbowKit themes with simple accent override for consistency
   },
   fonts: {
     body: '"Sora", "Trebuchet MS", sans-serif',
@@ -57,17 +77,37 @@ function RainbowKitWrapper({ children }) {
 export default function Providers({ children }) {
   const [queryClient] = useState(() => new QueryClient());
 
+  // Privy App ID - 替换为你自己的 App ID
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || 'cm61a9k1d02o7y52s89x5g73w';
+
   return (
-    <WagmiProvider config={config}>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <LanguageProvider>
-            <RainbowKitWrapper>
-              <AdminProvider>{children}</AdminProvider>
-            </RainbowKitWrapper>
-          </LanguageProvider>
-        </ThemeProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <PrivyProvider
+      appId={appId}
+      config={{
+        appearance: {
+          theme: 'light',
+          accentColor: '#676FFF',
+          logo: 'https://guadao.xyz/logo.png', // 替换为你的Logo
+        },
+        loginMethods: ['email', 'wallet', 'google', 'twitter', 'discord'],
+        embeddedWallets: {
+          createOnLogin: 'users-without-wallets',
+        },
+        supportedChains: [base, baseSepolia],
+      }}
+    >
+      <WagmiProvider config={config}>
+        <QueryClientProvider client={queryClient}>
+          <WalletSync />
+          <ThemeProvider>
+            <LanguageProvider>
+              <RainbowKitWrapper>
+                <AdminProvider>{children}</AdminProvider>
+              </RainbowKitWrapper>
+            </LanguageProvider>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </WagmiProvider>
+    </PrivyProvider>
   );
 }

@@ -367,6 +367,8 @@ const translations = {
     'profile.stats.airdropAmount': '空投总量',
     // Wallet
     'wallet.connect': '连接钱包',
+    'wallet.social_login': '社交登录',
+    'wallet.export_key': '导出私钥',
     'wallet.disconnect': '断开连接',
     'markdown.copy': '复制',
     'markdown.copied': '已复制',
@@ -834,6 +836,8 @@ const translations = {
     'profile.stats.airdropAmount': '空投总量',
     // Wallet
     'wallet.connect': 'Connect Wallet',
+    'wallet.social_login': 'Social Login',
+    'wallet.export_key': 'Export Key',
     'wallet.disconnect': 'Disconnect',
     'markdown.copy': 'Copy',
     'markdown.copied': 'Copied',

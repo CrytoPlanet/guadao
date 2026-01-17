@@ -25,7 +25,11 @@ const GOVERNOR_ABI = parseAbi([
     'function hasVoted(uint256 proposalId, address account) view returns (bool)',
     'function queue(address[] targets, uint256[] values, bytes[] calldatas, bytes32 descriptionHash)',
     'function execute(address[] targets, uint256[] values, bytes[] calldatas, bytes32 descriptionHash)',
-    'function quorum(uint256 blockNumber) view returns (uint256)'
+    'function quorum(uint256 blockNumber) view returns (uint256)',
+]);
+
+const GOVERNOR_EVENTS_ABI = parseAbi([
+    'event VoteCast(address indexed voter, uint256 proposalId, uint8 support, uint256 weight, string reason)'
 ]);
 
 const TOKEN_ABI = parseAbi([
@@ -46,6 +50,17 @@ const formatDateTime = (timestamp) => {
     return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
 };
 
+// Format large numbers compactly
+const formatCompact = (num) => {
+    if (num >= 1000000) {
+        return (num / 1000000).toFixed(2).replace(/\.?0+$/, '') + 'M';
+    }
+    if (num >= 1000) {
+        return (num / 1000).toFixed(2).replace(/\.?0+$/, '') + 'K';
+    }
+    return num.toFixed(2).replace(/\.?0+$/, '');
+};
+
 export default function GovernanceDetailPage() {
     const { t, lang } = useI18n();
     const params = useParams();
@@ -61,6 +76,7 @@ export default function GovernanceDetailPage() {
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [delegateeInput, setDelegateeInput] = useState(''); // For input field
     const [currentBlockNumber, setCurrentBlockNumber] = useState(0n);
+    const [voters, setVoters] = useState([]);
 
     const { address, isConnected } = useAccount();
     const chainId = useChainId();
@@ -293,6 +309,36 @@ export default function GovernanceDetailPage() {
                     }
                 }
 
+                // 4. Fetch Voters from VoteCast events
+                try {
+                    const voteLogsChunks = await Promise.all(
+                        chunks.map(async ({ from, to }) => {
+                            try {
+                                return await publicClient.getLogs({
+                                    address: governorAddress,
+                                    event: GOVERNOR_EVENTS_ABI[0],
+                                    fromBlock: from,
+                                    toBlock: to
+                                });
+                            } catch (e) {
+                                return [];
+                            }
+                        })
+                    );
+                    const allVoteLogs = voteLogsChunks.flat();
+                    // Filter for this proposal
+                    const proposalVoteLogs = allVoteLogs.filter(l => l.args && l.args.proposalId === proposalId);
+                    const votersList = proposalVoteLogs.map(l => ({
+                        voter: l.args.voter,
+                        support: Number(l.args.support), // 0=Against, 1=For, 2=Abstain
+                        weight: l.args.weight,
+                    }));
+                    setVoters(votersList);
+                } catch (e) {
+                    console.warn('Failed to fetch voters', e);
+                    setVoters([]);
+                }
+
                 setStatus(statusLoaded());
             } catch (e) {
                 console.error(e);
@@ -454,7 +500,7 @@ export default function GovernanceDetailPage() {
                             <div>
                                 <span className="muted">{t('governance.quorum')}</span>
                                 <div style={{ marginTop: '6px', fontSize: '1.1em' }}>
-                                    {formatUnits(proposalData.quorum, 18)} GUA
+                                    {formatCompact(Number(formatUnits(proposalData.quorum, 18)))} GUA
                                     <span className="muted" style={{ fontSize: '0.8em', marginLeft: '6px' }}>
                                         ({Number(proposalData.quorum) > 0 ? Math.min(((Number(proposalData.forVotes) + Number(proposalData.abstainVotes)) / Number(proposalData.quorum)) * 100, 100).toFixed(1) : '0'}%)
                                     </span>
@@ -485,6 +531,14 @@ export default function GovernanceDetailPage() {
                             proposalData={proposalData}
                             quorum={proposalData.quorum}
                             symbol="GUA"
+                            voters={voters}
+                            chainId={chainId}
+                            canVote={isConnected && proposalData.state === 1 && !proposalData.hasVoted && proposalData.myVotes > 0n}
+                            onVote={handleVote}
+                            isVoting={action === 'vote'}
+                            hasVoted={proposalData.hasVoted}
+                            myVotes={proposalData.myVotes}
+                            isConnected={isConnected}
                         />
                     </section>
                 )
@@ -739,76 +793,37 @@ export default function GovernanceDetailPage() {
                 )
             }
 
-            <section className="panel">
-                <h2>{t('governance.voting.title')}</h2>
-                {proposalData?.state === 0 && (
-                    <div className="status-message">
-                        <p>
-                            {t('voting.window.pending.block', { block: proposalData.voteStart.toString() })}
-                            <span className="muted" style={{ marginLeft: '8px', fontSize: '0.9em' }}>
-                                (≈ {proposalData.startTimestamp
-                                    ? new Date(proposalData.startTimestamp * 1000).toLocaleString()
-                                    : formatDateTime((Date.now() / 1000) + (Number(proposalData.voteStart) - Number(currentBlockNumber || 0)) * 2)
-                                })
-                            </span>
-                        </p>
-                    </div>
-                )}
+            {/* Proposal Actions - Queue/Execute/Status */}
+            {proposalData && (proposalData.state >= 4 || proposalData.state === 2 || proposalData.state === 3 || proposalData.state === 6 || proposalData.state === 7) && (
+                <section className="panel">
+                    <h2>{t('governance.actions.title')}</h2>
 
-                {proposalData?.state === 1 && (
-                    <>
-                        {isConnected ? (
-                            proposalData.hasVoted ? (
-                                <p className="muted">{t('voting.steps.submit')} (Done)</p>
-                            ) : (
-                                <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                                    <button className="btn primary" onClick={() => handleVote(1)} disabled={!!action || proposalData.myVotes === 0n}>
-                                        {t('governance.votes.for')}
-                                    </button>
-                                    <button className="btn secondary" onClick={() => handleVote(0)} disabled={!!action || proposalData.myVotes === 0n}>
-                                        {t('governance.votes.against')}
-                                    </button>
-                                    <button className="btn ghost" onClick={() => handleVote(2)} disabled={!!action || proposalData.myVotes === 0n}>
-                                        {t('governance.votes.abstain')}
-                                    </button>
-                                </div>
-                            )
-                        ) : (
-                            <p className="muted">{t('wallet.connect')}</p>
-                        )}
-                        {isConnected && proposalData.myVotes === 0n && (
-                            <p className="warning-text" style={{ color: 'orange', marginTop: '0.5rem' }}>
-                                {t('governance.warning.noVotes')} {t('governance.warning.delegateCheck')}
-                            </p>
-                        )}
-                    </>
-                )}
+                    {/* Succeeded (4) -> Queue */}
+                    {proposalData.state === 4 && (
+                        <div className="actions">
+                            <p className="muted" style={{ marginBottom: '1rem' }}>Proposal has succeeded. Queue it for execution.</p>
+                            <button className="btn primary" onClick={handleQueue} disabled={!!action || isWriting}>
+                                {t('governance.queue')}
+                            </button>
+                        </div>
+                    )}
 
-                {/* Succeeded (4) -> Queue */}
-                {proposalData?.state === 4 && (
-                    <div className="actions">
-                        <p className="muted" style={{ marginBottom: '1rem' }}>Proposal has succeeded. Queue it for execution.</p>
-                        <button className="btn primary" onClick={handleQueue} disabled={!!action || isWriting}>
-                            {t('governance.queue')}
-                        </button>
-                    </div>
-                )}
+                    {/* Queued (5) -> Execute */}
+                    {proposalData.state === 5 && (
+                        <div className="actions">
+                            <p className="muted" style={{ marginBottom: '1rem' }}>Proposal is queued. It can be executed after the timelock delay.</p>
+                            <button className="btn primary" onClick={handleExecute} disabled={!!action || isWriting}>
+                                {t('governance.execute')}
+                            </button>
+                        </div>
+                    )}
 
-                {/* Queued (5) -> Execute */}
-                {proposalData?.state === 5 && (
-                    <div className="actions">
-                        <p className="muted" style={{ marginBottom: '1rem' }}>Proposal is queued. It can be executed after the timelock delay.</p>
-                        <button className="btn primary" onClick={handleExecute} disabled={!!action || isWriting}>
-                            {t('governance.execute')}
-                        </button>
-                    </div>
-                )}
-
-                {proposalData?.state === 2 && <p className="muted">Proposal Canceled</p>}
-                {proposalData?.state === 3 && <p className="muted">Proposal Defeated</p>}
-                {proposalData?.state === 6 && <p className="muted">Proposal Expired</p>}
-                {proposalData?.state === 7 && <p className="muted">Proposal Executed</p>}
-            </section>
+                    {proposalData.state === 2 && <p className="muted">Proposal Canceled</p>}
+                    {proposalData.state === 3 && <p className="muted">Proposal Defeated</p>}
+                    {proposalData.state === 6 && <p className="muted">Proposal Expired</p>}
+                    {proposalData.state === 7 && <p className="muted">✓ Proposal Executed</p>}
+                </section>
+            )}
         </main >
     );
 }

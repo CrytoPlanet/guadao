@@ -7,8 +7,8 @@ import {
   safeWallet,
   tokenPocketWallet,
   injectedWallet,
-  ledgerWallet,
   rabbyWallet,
+  oneKeyWallet,
 } from '@rainbow-me/rainbowkit/wallets';
 
 import appConfig from '../config.json';
@@ -48,13 +48,13 @@ export const config = getDefaultConfig({
         coinbaseWallet,
         rabbyWallet,
         tokenPocketWallet,
-        ledgerWallet,
+        oneKeyWallet,
       ],
     },
     {
-      groupName: 'Other',
+      groupName: 'Hardware & Other',
       wallets: [
-        walletConnectWallet,
+        walletConnectWallet, // Trezor 用户可通过 WalletConnect 连接
         injectedWallet,
       ],
     },

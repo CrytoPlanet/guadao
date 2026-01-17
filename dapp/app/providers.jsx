@@ -86,34 +86,42 @@ export default function Providers({ children }) {
   // Privy App ID - 替换为你自己的 App ID
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || 'cm61a9k1d02o7y52s89x5g73w';
 
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <PrivyProvider
-      appId={appId}
+      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID}
       config={{
         appearance: {
           theme: 'light',
           accentColor: '#676FFF',
-          logo: 'https://guadao.xyz/logo.png', // 替换为你的Logo
+          logo: 'https://guadao.xyz/icon.svg',
         },
-        loginMethods: ['email', 'wallet', 'google', 'twitter', 'discord'],
         embeddedWallets: {
           createOnLogin: 'users-without-wallets',
         },
-        supportedChains: [base, baseSepolia],
       }}
     >
-      <WagmiProvider config={config}>
-        <QueryClientProvider client={queryClient}>
-          <WalletSync />
-          <ThemeProvider>
-            <LanguageProvider>
-              <RainbowKitWrapper>
-                <AdminProvider>{children}</AdminProvider>
-              </RainbowKitWrapper>
-            </LanguageProvider>
-          </ThemeProvider>
-        </QueryClientProvider>
-      </WagmiProvider>
+      <QueryClientProvider client={queryClient}>
+        {mounted && (
+          <WagmiProvider config={config}>
+            <RainbowKitProvider
+              chains={config.chains}
+              theme={{
+                light: lightTheme(),
+                dark: darkTheme(),
+              }}
+            >
+              <WalletSync />
+              {children}
+            </RainbowKitProvider>
+          </WagmiProvider>
+        )}
+      </QueryClientProvider>
     </PrivyProvider>
   );
 }

@@ -2,6 +2,7 @@ import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { base, baseSepolia, foundry } from 'viem/chains';
 import {
   metaMaskWallet,
+  rainbowWallet,
   walletConnectWallet,
   coinbaseWallet,
   safeWallet,
@@ -10,6 +11,7 @@ import {
   rabbyWallet,
   oneKeyWallet,
 } from '@rainbow-me/rainbowkit/wallets';
+import { toPrivyWallet } from '@privy-io/cross-app-connect/rainbow-kit';
 
 import appConfig from '../config.json';
 
@@ -44,11 +46,22 @@ export const config = getDefaultConfig({
       groupName: 'Recommended',
       wallets: [
         metaMaskWallet,
+        rainbowWallet,
         (options) => safeWallet({ ...options, allowedDomains: [/gnosis-safe\.io$/, /safe\.global$/, /.*/] }),
         coinbaseWallet,
         rabbyWallet,
         tokenPocketWallet,
         oneKeyWallet,
+      ],
+    },
+    {
+      groupName: 'Social Login',
+      wallets: [
+        toPrivyWallet({
+          id: process.env.NEXT_PUBLIC_PRIVY_APP_ID || 'cm61a9k1d02o7y52s89x5g73w',
+          name: 'Privy',
+          iconUrl: 'https://guadao.xyz/icon.svg',
+        }),
       ],
     },
     {

@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@privy-io/cross-app-connect": "^0.4.1",
     "@privy-io/react-auth": "^3.11.0",
     "@privy-io/wagmi": "^3.0.0",
     "@rainbow-me/rainbowkit": "^2.2.10",

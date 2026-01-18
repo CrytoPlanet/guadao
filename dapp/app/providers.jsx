@@ -19,41 +19,42 @@ import { useConnect, useConfig } from 'wagmi';
 /**
  * Syncs Privy wallet with Wagmi
  */
+/**
+ * Syncs Privy wallet with Wagmi
+ */
 function WalletSync() {
   const { isConnected } = useAccount();
   const { authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
-  const { connect } = useConnect();
-
-  // Use a ref to prevent repeated sync attempts for the same wallet
-  const [syncedWalletId, setSyncedWalletId] = useState(null);
+  const { connect, status } = useConnect();
 
   useEffect(() => {
     const syncWallet = async () => {
-      if (ready && authenticated && !isConnected && wallets.length > 0) {
-        // Find the embedded wallet (type 'privy') or default to first
+      // Connect if:
+      // 1. Privy is ready and authenticated
+      // 2. Wagmi is NOT connected
+      // 3. We have Privy wallets available
+      // 4. We are not currently in the middle of connecting (to avoid loops)
+      if (ready && authenticated && !isConnected && wallets.length > 0 && status !== 'pending') {
+
+        // Find the embedded wallet or default to first
         const privyWallet = wallets.find((w) => w.walletClientType === 'privy');
         const targetWallet = privyWallet || wallets[0];
 
-        // Avoid repeated syncs
-        if (syncedWalletId === targetWallet.address) return;
-
-        console.log('WalletSync: Syncing Privy wallet to Wagmi', targetWallet);
+        console.log('WalletSync: Syncing Privy wallet to Wagmi...', targetWallet.address);
 
         try {
           const provider = await targetWallet.getEthereumProvider();
-          // Create a custom injected connector for Privy
-          // We use the specific address as ID to avoid conflicts
+          // Create a custom injected connector
           const connector = injected({
             target: {
               provider,
-              id: `privy-${targetWallet.address}`,
+              id: `privy-connector-${targetWallet.address}`,
               name: 'Privy Wallet',
             }
           });
 
           connect({ connector });
-          setSyncedWalletId(targetWallet.address);
         } catch (error) {
           console.error('WalletSync: Failed to sync', error);
         }
@@ -61,7 +62,7 @@ function WalletSync() {
     };
 
     syncWallet();
-  }, [ready, authenticated, isConnected, wallets, connect, syncedWalletId]);
+  }, [ready, authenticated, isConnected, wallets, connect, status]);
 
   return null;
 }

@@ -13,7 +13,8 @@ import { config } from '../lib/wagmi';
 import { LanguageProvider, useI18n } from './components/LanguageProvider';
 import { AdminProvider } from './components/AdminProvider';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
-import { reconnect } from '@wagmi/core';
+import { injected } from 'wagmi/connectors';
+import { useConnect, useConfig } from 'wagmi';
 
 /**
  * Syncs Privy wallet with Wagmi
@@ -22,19 +23,45 @@ function WalletSync() {
   const { isConnected } = useAccount();
   const { authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
-  const { setActiveWallet } = usePrivyWagmi();
+  const { connect } = useConnect();
+
+  // Use a ref to prevent repeated sync attempts for the same wallet
+  const [syncedWalletId, setSyncedWalletId] = useState(null);
 
   useEffect(() => {
-    // Force sync if authenticated but not connected in Wagmi
-    if (ready && authenticated && !isConnected && wallets.length > 0) {
-      // Find the embedded wallet (type 'privy') or default to first
-      const privyWallet = wallets.find((w) => w.walletClientType === 'privy');
-      const targetWallet = privyWallet || wallets[0];
+    const syncWallet = async () => {
+      if (ready && authenticated && !isConnected && wallets.length > 0) {
+        // Find the embedded wallet (type 'privy') or default to first
+        const privyWallet = wallets.find((w) => w.walletClientType === 'privy');
+        const targetWallet = privyWallet || wallets[0];
 
-      console.log('WalletSync: Syncing Privy wallet to Wagmi', targetWallet);
-      setActiveWallet(targetWallet);
-    }
-  }, [ready, authenticated, isConnected, wallets, setActiveWallet]);
+        // Avoid repeated syncs
+        if (syncedWalletId === targetWallet.address) return;
+
+        console.log('WalletSync: Syncing Privy wallet to Wagmi', targetWallet);
+
+        try {
+          const provider = await targetWallet.getEthereumProvider();
+          // Create a custom injected connector for Privy
+          // We use the specific address as ID to avoid conflicts
+          const connector = injected({
+            target: {
+              provider,
+              id: `privy-${targetWallet.address}`,
+              name: 'Privy Wallet',
+            }
+          });
+
+          connect({ connector });
+          setSyncedWalletId(targetWallet.address);
+        } catch (error) {
+          console.error('WalletSync: Failed to sync', error);
+        }
+      }
+    };
+
+    syncWallet();
+  }, [ready, authenticated, isConnected, wallets, connect, syncedWalletId]);
 
   return null;
 }

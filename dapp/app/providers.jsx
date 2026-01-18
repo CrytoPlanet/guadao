@@ -14,7 +14,7 @@ import { LanguageProvider, useI18n } from './components/LanguageProvider';
 import { AdminProvider } from './components/AdminProvider';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { injected } from 'wagmi/connectors';
-import { useConnect, useConfig } from 'wagmi';
+import { useConnect, useConfig, useDisconnect } from 'wagmi';
 
 /**
  * Syncs Privy wallet with Wagmi
@@ -27,6 +27,7 @@ function WalletSync() {
   const { authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
   const { connect, status } = useConnect();
+  const { disconnect } = useDisconnect();
 
   useEffect(() => {
     const syncWallet = async () => {
@@ -59,10 +60,16 @@ function WalletSync() {
           console.error('WalletSync: Failed to sync', error);
         }
       }
+
+      // Automatically disconnect Wagmi if Privy is logged out
+      if (ready && !authenticated && isConnected) {
+        console.log('WalletSync: Privy logged out, disconnecting Wagmi...');
+        disconnect();
+      }
     };
 
     syncWallet();
-  }, [ready, authenticated, isConnected, wallets, connect, status]);
+  }, [ready, authenticated, isConnected, wallets, connect, status, disconnect]);
 
   return null;
 }

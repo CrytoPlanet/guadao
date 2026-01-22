@@ -4,22 +4,27 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
+import { usePrivy } from '@privy-io/react-auth';
 
 import { useI18n } from './LanguageProvider';
 import { useAdmin } from './AdminProvider';
 import NetworkStatus from './NetworkStatus';
 import TokenBalance from '../../components/TokenBalance';
 import { useTheme } from '../components/ThemeProvider';
+import SocialWalletModal from './SocialWalletModal';
+import config from '../../config.json';
 
 export default function SiteHeader() {
   const { address, isConnected } = useAccount();
   const { lang, setLang, t } = useI18n();
   const { isAdmin } = useAdmin();
   const { theme, toggleTheme, mounted } = useTheme();
+  const { login, logout, exportWallet, authenticated, ready, user: privyUser } = usePrivy();
 
   const [isVisible, setIsVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [isAtTop, setIsAtTop] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -85,16 +90,67 @@ export default function SiteHeader() {
           {lang === 'zh' ? t('lang.en') : t('lang.zh')}
         </button>
         <ConnectButton.Custom>
-          {({ account, openConnectModal, openAccountModal }) => (
-            <button
-              className="btn primary"
-              onClick={account ? openAccountModal : openConnectModal}
-            >
-              {mounted && account
-                ? `${account.address.slice(0, 6)}...${account.address.slice(-4)}`
-                : t('wallet.connect')}
-            </button>
-          )}
+          {({ account, openConnectModal, openAccountModal }) => {
+            // 只要登录了 Privy，就显示自定义 UI
+            if (authenticated) {
+              const displayAddress = privyUser?.wallet?.address;
+              const displayName = privyUser?.email?.address || (displayAddress ? `${displayAddress.slice(0, 6)}...${displayAddress.slice(-4)}` : t('wallet.social_user'));
+
+              // Check if Wagmi is synced to the SAME wallet
+              const isWagmiSynced = account && displayAddress && account.address.toLowerCase() === displayAddress.toLowerCase();
+
+              return (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {/* Social Profile Button (Opens Modal) */}
+                  <button
+                    className="btn primary"
+                    onClick={() => setIsModalOpen(true)}
+                    title={t('wallet.social_user')}
+                    style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}
+                  >
+                    <span style={{ fontSize: '1.2em' }}>👻</span>
+                    {displayName}
+                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>▼</span>
+                  </button>
+
+                  <SocialWalletModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+
+                  {/* 仅当 Wagmi 未同步或连接了不同钱包时，才显示连接按钮 */}
+                  {(!isWagmiSynced) && (
+                    <button
+                      className="btn ghost"
+                      onClick={account ? openAccountModal : openConnectModal}
+                    >
+                      {t('wallet.connect')}
+                    </button>
+                  )}
+                </div>
+              )
+            }
+
+            return (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {!account && !authenticated && (
+                  <button
+                    className="btn ghost"
+                    onClick={login}
+                    disabled={!ready}
+                    style={{ fontSize: '0.9em', opacity: ready ? 1 : 0.7, cursor: ready ? 'pointer' : 'not-allowed' }}
+                  >
+                    {!ready ? 'Loading...' : t('wallet.social_login')}
+                  </button>
+                )}
+                <button
+                  className="btn primary"
+                  onClick={account ? openAccountModal : openConnectModal}
+                >
+                  {mounted && account
+                    ? `${account.address.slice(0, 6)}...${account.address.slice(-4)}`
+                    : t('wallet.connect')}
+                </button>
+              </div>
+            )
+          }}
         </ConnectButton.Custom>
       </div>
       {mounted && <NetworkStatus />}

@@ -12,6 +12,7 @@ import { isAddress, parseAbi, createPublicClient, http } from 'viem';
 import { baseSepolia, base, anvil } from 'viem/chains';
 
 import { defaultChainId, getChainOptions } from '../../lib/appConfig';
+import config from '../../config.json';
 import { bytes32ToCid, fetchFromIPFS } from '../../lib/ipfs';
 import {
   statusReady,
@@ -40,6 +41,13 @@ const ESCROW_EVENTS_ABI = parseAbi([
   'function getProposal(uint256 proposalId) view returns (uint64,uint64,uint8,uint8,uint256,uint256,bool,uint256,uint256,uint256,bool,bytes32,bytes32,bytes32,uint256,bool,address,bytes32,bytes32,bool,address,bool,bool,bytes32)',
 ]);
 
+const GOVERNOR_ABI = parseAbi([
+  'event ProposalCreated(uint256 proposalId, address proposer, address[] targets, uint256[] values, string[] signatures, bytes[] calldatas, uint256 voteStart, uint256 voteEnd, string description)',
+  'function state(uint256 proposalId) view returns (uint8)',
+  'function proposalSnapshot(uint256 proposalId) view returns (uint256)',
+  'function proposalDeadline(uint256 proposalId) view returns (uint256)',
+]);
+
 const STATUS_LABELS = {
   zh: ['已创建', '投票中', '投票结束', '已确认', '已提交', '质疑中', '已完成', '已拒绝', '已过期'],
   en: ['Created', 'Voting', 'Voting ended', 'Accepted', 'Submitted', 'Disputed', 'Completed', 'Denied', 'Expired'],
@@ -49,6 +57,24 @@ const formatDateTime = (timestamp) => {
   if (!timestamp) return '-';
   const date = new Date(Number(timestamp) * 1000);
   return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+};
+
+const formatBlockOrTime = (val, currentBlock) => {
+  if (!val) return '-';
+  // Check if likely timestamp (> 1.5B)
+  if (Number(val) > 1500000000) {
+    const date = new Date(Number(val) * 1000);
+    return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+  }
+  // Else block
+  let est = '';
+  if (currentBlock && Number(currentBlock) > 0) {
+    const diff = (Number(val) - Number(currentBlock)) * 2;
+    const ts = (Date.now() / 1000) + diff;
+    const d = new Date(ts * 1000);
+    est = ` (≈ ${d.toLocaleString()})`;
+  }
+  return `Block #${val.toString()}${est}`;
 };
 
 export default function ProposalsPage() {
@@ -61,16 +87,25 @@ export default function ProposalsPage() {
   const [historyProposals, setHistoryProposals] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Governance State
+  const [activeTab, setActiveTab] = useState('bounty'); // 'bounty' | 'governance'
+  const [governorAddress, setGovernorAddress] = useState('');
+  const [governanceLogs, setGovernanceLogs] = useState([]);
+  const [governanceProposals, setGovernanceProposals] = useState([]);
+  const [govStatus, setGovStatus] = useState(statusReady());
+
   // Pagination State
   const [allLogs, setAllLogs] = useState([]);
   const [loadedCount, setLoadedCount] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [currentBlockNumber, setCurrentBlockNumber] = useState(0n);
   const BATCH_SIZE = 12;
 
   const { isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const wagmiPublicClient = usePublicClient();
+
 
   const chainMismatch = isConnected && targetChainId && chainId !== targetChainId;
 
@@ -90,7 +125,100 @@ export default function ProposalsPage() {
   useEffect(() => {
     if (!activeChainConfig) return;
     setEscrowAddress(activeChainConfig.escrowAddress || '');
+    setGovernorAddress(activeChainConfig.governorAddress || '');
   }, [activeChainConfig]);
+
+  // Governance Fetcher
+  useEffect(() => {
+    const fetchGovLogs = async () => {
+      // Only fetch if tab is active and we have address
+      if (activeTab !== 'governance' || !isAddress(governorAddress) || !activeChainConfig?.rpcUrl) return;
+
+      let client = wagmiPublicClient;
+      if (!client) {
+        const chainById = { [base.id]: base, [baseSepolia.id]: baseSepolia, [anvil.id]: anvil };
+        const chain = chainById[targetChainId] || baseSepolia;
+        client = createPublicClient({ chain, transport: http(activeChainConfig.rpcUrl) });
+      }
+
+      try {
+        setGovStatus(statusLoading());
+        // Simple fetch for now --> UPDATED TO BATCH FETCH
+        const currentBlock = await client.getBlockNumber();
+        setCurrentBlockNumber(currentBlock);
+        const startBlock = activeChainConfig?.startBlock ? BigInt(activeChainConfig.startBlock) : 0n;
+        const CHUNK_SIZE = 50000n; // Safety margin under 100k limit
+
+        const chunks = [];
+        for (let i = startBlock; i <= currentBlock; i += CHUNK_SIZE) {
+          const toBlock = i + CHUNK_SIZE - 1n < currentBlock ? i + CHUNK_SIZE - 1n : currentBlock;
+          chunks.push({ from: i, to: toBlock });
+        }
+
+        const logsChunks = await Promise.all(
+          chunks.map(async ({ from, to }) => {
+            try {
+              return await client.getLogs({
+                address: governorAddress,
+                event: GOVERNOR_ABI[0], // ProposalCreated
+                fromBlock: from,
+                toBlock: to
+              });
+            } catch (e) {
+              console.warn(`Failed to fetch gov logs for range ${from}-${to}`, e);
+              return [];
+            }
+          })
+        );
+        const logs = logsChunks.flat();
+
+        const proposals = await Promise.all(logs.map(async (log) => {
+          const pid = log.args.proposalId;
+          let state = 0;
+          try {
+            state = await client.readContract({
+              address: governorAddress,
+              abi: GOVERNOR_ABI,
+              functionName: 'state',
+              args: [pid]
+            });
+          } catch (e) { console.warn('state fetch fail', e); }
+
+          // Parsing description for title
+          let title = '';
+          const desc = log.args.description || '';
+          if (desc) {
+            const lines = desc.split('\n');
+            const firstLine = lines.find(line => line.trim().length > 0 && !line.trim().startsWith('```'));
+            if (firstLine) {
+              title = firstLine.replace(/^#+\s*/, '').trim();
+              // Truncate if too long (e.g. > 80 chars)
+              if (title.length > 80) title = title.substring(0, 80) + '...';
+            }
+          }
+
+          return {
+            id: pid,
+            proposer: log.args.proposer,
+            description: desc,
+            title: title, // Parsed title
+            voteStart: log.args.voteStart,
+            voteEnd: log.args.voteEnd,
+            state: state
+          };
+        }));
+
+        proposals.sort((a, b) => Number(b.id) - Number(a.id));
+        setGovernanceProposals(proposals);
+        setGovStatus(statusLoaded());
+
+      } catch (e) {
+        console.error("Gov fetch error", e);
+        setGovStatus(statusError('status.error', { message: e.message }));
+      }
+    };
+    fetchGovLogs();
+  }, [activeTab, governorAddress, activeChainConfig, wagmiPublicClient, targetChainId]);
 
   // Reset state when chain/address changes
   useEffect(() => {
@@ -253,6 +381,7 @@ export default function ProposalsPage() {
       setStatus(statusLoaded()); // Ensure status is loaded
     } catch (err) {
       console.error("Batch load error", err);
+      setStatus(statusLoaded()); // Unblock UI on error
     } finally {
       setIsLoadingMore(false);
     }
@@ -321,7 +450,7 @@ export default function ProposalsPage() {
       <section className="panel hero">
         <div>
           <p className="eyebrow">{t('proposals.eyebrow')}</p>
-          <h1>{t('proposals.title')}</h1>
+          <h1>{t('nav.proposals')}</h1>
           <p className="lede">{t('proposals.lede')}</p>
           <div className="hero-actions">
             <button
@@ -370,6 +499,20 @@ export default function ProposalsPage() {
               />
             </label>
             <label className="field">
+              <span>{t('proposals.config.governor')}</span>
+              <input
+                value={governorAddress}
+                placeholder="0x..."
+                onChange={(event) => setGovernorAddress(event.target.value)}
+              />
+              <ExplorerLink
+                chainId={chainId}
+                type="address"
+                value={governorAddress}
+                label={t('status.contract.link')}
+              />
+            </label>
+            <label className="field">
               <span>{t('proposals.config.network')}</span>
               <select
                 value={targetChainId}
@@ -398,6 +541,50 @@ export default function ProposalsPage() {
         </section>
       )}
 
+      {/* Governance Portals */}
+      <section className="panel">
+        <h2>{t('governance.portal.title')}</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+          <a className="status-card" href={config.governance.snapshotUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none', color: 'inherit', padding: '1rem', minHeight: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '1.2rem' }}>⚡</span>
+              <strong>{t('governance.portal.snapshot')} ↗</strong>
+            </div>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85em' }}>{t('governance.portal.desc.snapshot')}</p>
+          </a>
+          <a className="status-card" href={config.governance.tallyUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none', color: 'inherit', padding: '1rem', minHeight: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '1.2rem' }}>🏛️</span>
+              <strong>{t('governance.portal.tally')} ↗</strong>
+            </div>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85em' }}>{t('governance.portal.desc.tally')}</p>
+          </a>
+          <Link href="/treasury" className="status-card" style={{ display: 'block', textDecoration: 'none', color: 'inherit', padding: '1rem', minHeight: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '1.2rem' }}>💰</span>
+              <strong>{t('governance.portal.treasury')} →</strong>
+            </div>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85em' }}>{t('governance.portal.desc.treasury')}</p>
+          </Link>
+        </div>
+      </section>
+
+      {/* Tabs */}
+      <div className="tabs" style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+        <button
+          className={`btn ${activeTab === 'bounty' ? 'primary' : 'ghost'}`}
+          onClick={() => setActiveTab('bounty')}
+        >
+          {t('proposals.tab.bounty')}
+        </button>
+        <button
+          className={`btn ${activeTab === 'governance' ? 'primary' : 'ghost'}`}
+          onClick={() => setActiveTab('governance')}
+        >
+          {t('proposals.tab.governance')}
+        </button>
+      </div>
+
       {/* Search Bar */}
       <div className="search-bar">
         <span className="icon">🔍</span>
@@ -418,49 +605,87 @@ export default function ProposalsPage() {
         )}
       </div>
 
-      {/* Active Proposals */}
-      <section className="panel">
-        <h2>{t('proposals.list.active')}</h2>
-        <StatusNotice status={status} />
-        {filteredActive.length === 0 && searchQuery ? (
-          <p className="muted">{t('proposals.search.no_results')}</p>
-        ) : filteredActive.length === 0 && status?.kind === 'loaded' ? (
-          <p className="muted">{t('proposals.list.empty')}</p>
-        ) : (
-          <div className="form-grid">
-            {filteredActive.map(renderProposalCard)}
-          </div>
-        )}
-      </section>
+      {activeTab === 'bounty' ? (
+        <>
+          {/* Active Proposals */}
+          <section className="panel">
+            <h2>{t('governance.bounties.title')} ({t('proposals.list.active')})</h2>
+            <StatusNotice status={status} />
+            {filteredActive.length === 0 && searchQuery ? (
+              <p className="muted">{t('proposals.search.no_results')}</p>
+            ) : filteredActive.length === 0 && status?.kind === 'loaded' ? (
+              <p className="muted">{t('proposals.list.empty')}</p>
+            ) : (
+              <div className="form-grid">
+                {filteredActive.map(renderProposalCard)}
+              </div>
+            )}
+          </section>
 
-      {/* History Proposals */}
-      {historyProposals.length > 0 && (
-        <section className="panel">
-          <h2>{t('proposals.list.history')}</h2>
-          {filteredHistory.length === 0 && searchQuery ? (
-            <p className="muted">{t('proposals.search.no_results')}</p>
-          ) : filteredHistory.length === 0 ? (
-            <p className="muted">{t('proposals.list.empty')}</p>
-          ) : (
-            <div className="form-grid">
-              {filteredHistory.map(renderProposalCard)}
+          {/* History Proposals */}
+          {historyProposals.length > 0 && (
+            <section className="panel">
+              <h2>{t('proposals.list.history')}</h2>
+              {filteredHistory.length === 0 && searchQuery ? (
+                <p className="muted">{t('proposals.search.no_results')}</p>
+              ) : filteredHistory.length === 0 ? (
+                <p className="muted">{t('proposals.list.empty')}</p>
+              ) : (
+                <div className="form-grid">
+                  {filteredHistory.map(renderProposalCard)}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Load More Button */}
+          {allLogs.length > loadedCount && loadedCount > 0 && (
+            <div style={{ textAlign: 'center', margin: '2rem 0' }}>
+              <button
+                className="btn secondary"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+              >
+                {isLoadingMore ? t('ui.loading') || 'Loading...' : `${t('ui.loadMore') || 'Load More'} (${loadedCount}/${allLogs.length})`}
+              </button>
             </div>
           )}
+        </>
+      ) : (
+        <section className="panel">
+          <h2>{t('proposals.tab.governance')}</h2>
+          <StatusNotice status={govStatus} />
+          {governanceProposals.length === 0 && (
+            <div className="status-card" style={{ textAlign: 'center', padding: '2rem' }}>
+              <p className="muted">
+                {govStatus.kind === 'loading' ? t('status.loading') :
+                  !governorAddress ? t('status.invalidAddress') + ' (Contract not deployed)' :
+                    t('proposals.list.empty')}
+              </p>
+            </div>
+          )}
+          <div className="form-grid">
+            {governanceProposals.map((p, index) => (
+              <Link
+                key={p.id?.toString() ?? index}
+                className="btn ghost"
+                href={p.id ? `/governance/${p.id}` : '#'}
+              >
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <strong>{p.title ? p.title : `${t('proposal.detail.title')}${p.id?.toString() ?? '-'}`}</strong>
+                    <span className="badge">{t(`governance.status.${p.state}`) || p.state}</span>
+                  </div>
+                  {/* <p style={{ margin: '4px 0' }}>{p.description}</p> */}
+                  <div className="muted">{t('proposals.card.start')}: {formatBlockOrTime(p.voteStart, currentBlockNumber)}</div>
+                  <div className="muted">{t('proposals.card.end')}: {formatBlockOrTime(p.voteEnd, currentBlockNumber)}</div>
+                </div>
+              </Link>
+            ))}
+          </div>
         </section>
       )}
 
-      {/* Load More Button */}
-      {allLogs.length > loadedCount && (
-        <div style={{ textAlign: 'center', margin: '2rem 0' }}>
-          <button
-            className="btn secondary"
-            onClick={handleLoadMore}
-            disabled={isLoadingMore}
-          >
-            {isLoadingMore ? t('ui.loading') || 'Loading...' : `${t('ui.loadMore') || 'Load More'} (${loadedCount}/${allLogs.length})`}
-          </button>
-        </div>
-      )}
     </main>
   );
 }

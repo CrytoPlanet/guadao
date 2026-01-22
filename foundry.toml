@@ -3,12 +3,16 @@ solc = "0.8.33"
 optimizer = true
 optimizer_runs = 200
 via_ir = false
-evm_version = "paris"
+evm_version = "cancun"
 # 抑制来自依赖库的警告（可选，不影响功能）
 # 这些警告来自 forge-std 库，可以安全忽略
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/"
+    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+    "@gnosis.pm/zodiac/=lib/zodiac/",
+    "@gnosis-guild/zodiac-core/=lib/zodiac/",
+    "@gnosis.pm/zodiac-module-reality/=lib/zodiac-module-reality/contracts/",
+    "@gnosis.pm/safe-contracts/=lib/safe-contracts/"
 ]
 
 [rpc_endpoints]

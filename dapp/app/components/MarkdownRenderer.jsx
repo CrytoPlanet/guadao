@@ -225,6 +225,27 @@ function extractHeadings(markdown) {
 
 function TableOfContents({ headings }) {
     const { t } = useI18n();
+    const [activeId, setActiveId] = useState('');
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        setActiveId(entry.target.id);
+                    }
+                });
+            },
+            { rootMargin: '-20% 0px -35% 0px' }
+        );
+
+        headings.forEach((heading) => {
+            const element = document.getElementById(heading.id);
+            if (element) observer.observe(element);
+        });
+
+        return () => observer.disconnect();
+    }, [headings]);
 
     if (!headings || headings.length === 0) return null;
 
@@ -235,10 +256,18 @@ function TableOfContents({ headings }) {
                 {headings.map((heading, index) => (
                     <li
                         key={index}
-                        className={`toc-item toc-level-${heading.level}`}
+                        className={`toc-item toc-level-${heading.level} ${activeId === heading.id ? 'active' : ''}`}
                         style={{ paddingLeft: `${(heading.level - 1) * 12}px` }}
                     >
-                        <a href={`#${heading.id}`}>{heading.text}</a>
+                        <a
+                            href={`#${heading.id}`}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                document.getElementById(heading.id)?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                        >
+                            {heading.text}
+                        </a>
                     </li>
                 ))}
             </ul>

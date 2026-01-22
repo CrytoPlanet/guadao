@@ -3,6 +3,11 @@
   "walletConnect": {
     "projectId": ""
   },
+  "governance": {
+    "snapshotSpace": "guadao.eth",
+    "snapshotUrl": "https://snapshot.org/#/guadao.eth",
+    "tallyUrl": "https://www.tally.xyz/gov/guadao"
+  },
   "chains": {
     "8453": {
       "label": "Base Mainnet",
@@ -10,20 +15,24 @@
       "universalAirdropAddress": "",
       "escrowAddress": "",
       "guaTokenAddress": "",
+      "governorAddress": "",
+      "timelockAddress": "",
       "proofsUrl": "/merkle/proofs.json",
       "rpcUrl": "https://mainnet.base.org",
       "explorerUrl": "https://basescan.org"
     },
     "31337": {
       "label": "Local Anvil",
-      "airdropAddress": "0x4a679253410272dd5232b3ff7cf5dbb88f295319",
-      "universalAirdropAddress": "0xc5a5c42992decbae36851359345fe25997f5c42d",
-      "escrowAddress": "0x9e545e3c0baab3e08cdfd552c960a1050f373042",
-      "guaTokenAddress": "0x322813fd9a801c5507c9de605d63cea4f2ce6c44",
+      "airdropAddress": "",
+      "universalAirdropAddress": "0x68b1d87f95878fe05b998f19b66f4baba5de1aed",
+      "escrowAddress": "0x70e0ba845a1a0f2da3359c97e0285013525ffc49",
+      "guaTokenAddress": "0xc3e53f4d16ae77db1c982e75a937b9f60fe63690",
+      "governorAddress": "0x1613beb3b2c4f22ee086b2b38c1476a3ce7f78e8",
+      "timelockAddress": "0xa82ff9afd8f496c3d6ac40e2a0f282e47488cfc9",
       "proofsUrl": "/merkle/proofs.json",
       "rpcUrl": "http://localhost:8545",
       "explorerUrl": "",
-      "startBlock": 13
+      "startBlock": 0
     },
     "84532": {
       "label": "Base Sepolia",
@@ -31,6 +40,8 @@
       "universalAirdropAddress": "0x86aD4a993b7aad7295B0032F13F2F68294Ac24F7",
       "escrowAddress": "0x09ffd59910d17aa85598f362fcbec05b35978319",
       "guaTokenAddress": "0x13ce0501266fdfd25fda8befe8a92815d1a5af08",
+      "governorAddress": "0xde892ff7bc1f241c48dc6a2982f9e76af36f1e93",
+      "timelockAddress": "0x7e2c8915cf91161ec8af3ba624e6f2e9f6df9220",
       "proofsUrl": "/merkle/proofs.json",
       "rpcUrl": "https://sepolia.base.org",
       "explorerUrl": "https://sepolia.basescan.org",

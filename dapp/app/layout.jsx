@@ -5,6 +5,7 @@ import 'katex/dist/katex.min.css';
 import Providers from './providers';
 import Background from './components/Background';
 import SiteHeader from './components/SiteHeader';
+import Footer from './components/Footer';
 
 export const metadata = {
   title: 'GUA dApp',
@@ -24,6 +25,7 @@ export default function RootLayout({ children }) {
           <Background />
           <SiteHeader />
           {children}
+          <Footer />
         </Providers>
       </body>
     </html>

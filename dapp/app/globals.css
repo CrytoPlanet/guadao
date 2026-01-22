@@ -806,6 +806,101 @@ textarea {
   }
 }
 
+/* ========== Vote Results Card ========== */
+.vote-results-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: var(--font-title);
+}
+
+.vote-results-card h3 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.result-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: rgba(15,15,15,0.06);
+  border-radius: 99px;
+  overflow: hidden;
+  position: relative;
+}
+
+.dark .progress-bar-bg {
+  background: rgba(255,255,255,0.1);
+}
+
+.progress-bar {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.5s ease;
+}
+
+/* Colors */
+/* For: Green */
+.type-for { color: #10b981; }
+.progress-bar.type-for { background: #10b981; }
+
+/* Against: Red */
+.type-against { color: #ef4444; }
+.progress-bar.type-against { background: #ef4444; }
+
+/* Abstain: Gray/Neutral */
+.type-abstain { color: #6b7280; }
+.dark .type-abstain { color: #9ca3af; }
+.progress-bar.type-abstain { background: #6b7280; }
+.dark .progress-bar.type-abstain { background: #9ca3af; }
+
+/* Quorum */
+.quorum-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ink);
+  opacity: 0.5;
+  z-index: 2;
+}
+
+.progress-bar.type-success { background: #10b981; }
+.progress-bar.type-neutral { background: #f59e0b; } /* Amber for "in progress" */
+
+.result-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.result-divider {
+  height: 1px;
+  background: var(--border-dashed);
+  margin: 4px 0;
+}
+
+.text-success { color: #10b981; }
+.text-muted { color: var(--muted); }
+
 /* ========== TokenBalance ========== */
 .token-balance {
   display: inline-flex;

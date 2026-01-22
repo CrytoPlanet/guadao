@@ -26,6 +26,6 @@
 - [x] 3.3 更新提案详情页读取 IPFS 内容
 
 ## 4. 验证
-- [ ] 4.1 运行 `forge test` 通过所有测试
-- [ ] 4.2 本地 Anvil 端到端测试
-- [ ] 4.3 Base Sepolia 测试网验证
+- [x] 4.1 运行 `forge test` 通过所有测试
+- [x] 4.2 本地 Anvil 端到端测试
+- [x] 4.3 Base Sepolia 测试网验证

@@ -512,8 +512,23 @@ export default function ProposalDetailPage() {
         const hash = await fn();
         if (hash) setLastTxHash(hash);
         setStatus(statusTxConfirming());
-        await publicClient.waitForTransactionReceipt({ hash });
-        setStatus(statusTxConfirmed());
+        try {
+          await publicClient.waitForTransactionReceipt({ hash });
+          setStatus(statusTxConfirmed());
+        } catch (receiptError) {
+          console.warn("Wait for receipt failed or timed out:", receiptError);
+          // If it's a timeout, we treat it as a warning but still try to refresh
+          if (receiptError?.message?.includes("Timed out") || receiptError?.name === 'TimeoutError') {
+            // Keep status as confirming or set to a specific "check explorer" state
+            // For now, let's leave it as confirming or set it to loaded so they can see the data update
+            // But technically we don't know if it confirmed.
+            // Best approach: Just proceed to refetch.
+            setStatus(statusTxSubmitted()); // Revert to submitted state or null?
+            // Actually, if we refetch and the data changed, the status update below will handle it.
+          } else {
+            throw receiptError; // Re-throw real errors
+          }
+        }
 
         // Refresh all data
         await Promise.all([
@@ -524,7 +539,17 @@ export default function ProposalDetailPage() {
           fetchEvents(),
         ]);
 
+        // If data updated successfully, we might want to reset status to ready
+        // But statusTxConfirmed leaves a success message.
+        // If we had a timeout, we definitely want to see the new data.
+        setStatus((prev) => (prev.kind === 'txConfirmed' ? prev : statusLoaded()));
+
+
       } catch (error) {
+        console.error("RunAction Error:", error);
+        if (error?.message) console.error("Error Message:", error.message);
+        if (error?.data) console.error("Error Data:", error.data);
+        if (error?.cause) console.error("Error Cause:", error.cause);
         const message = error?.shortMessage || error?.message || 'Action failed';
         setStatus(statusError('status.tx.failed', { reason: message }));
       } finally {
@@ -633,11 +658,15 @@ export default function ProposalDetailPage() {
     runAction(
       'finalizeVoting',
       async () => {
+        // Safe apps can have issues with gas estimation, so we provide a safe buffer
+        console.log('Finalizing voting for proposal:', proposalIdValue);
+        console.log('Target args:', [proposalIdValue]);
         return writeContractAsync({
           address: escrowAddress,
           abi: ESCROW_ABI,
           functionName: 'finalizeVoting',
           args: [proposalIdValue],
+          gas: 200000n,
         });
       },
       {
@@ -733,13 +762,21 @@ export default function ProposalDetailPage() {
             <span>{t('voting.window.end')}</span>
             <span>{formatDateTime(endTime)}</span>
           </div>
-          <div className="status-row">
-            <span>{t('escrow.summary.winner')}</span>
-            <span className="inline-group">
-              {shortAddress(readField(winnerTopicResult.data, 'owner', 0))}
-              <CopyButton value={readField(winnerTopicResult.data, 'owner', 0)} />
-            </span>
-          </div>
+          {(() => {
+            const winnerAddr = readField(winnerTopicResult.data, 'owner', 0);
+            if (proposalStatusValue > 1 && winnerAddr && winnerAddr !== '0x0000000000000000000000000000000000000000') {
+              return (
+                <div className="status-row">
+                  <span>{t('escrow.summary.winner')}</span>
+                  <span className="inline-group">
+                    {shortAddress(winnerAddr)}
+                    <CopyButton value={winnerAddr} />
+                  </span>
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
       </section>
 

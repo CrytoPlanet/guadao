@@ -10,5 +10,23 @@
       "name": "v5.5.0",
       "rev": "aa677e9d28ed78fc427ec47ba2baef2030c58e7c"
     }
+  },
+  "lib\\safe-contracts": {
+    "tag": {
+      "name": "v1.3.0",
+      "rev": "186a21a74b327f17fc41217a927dea7064f74604"
+    }
+  },
+  "lib\\zodiac": {
+    "tag": {
+      "name": "v4.2.1",
+      "rev": "36d0117b13d82bdedeed2fdafecf33ea01d208d9"
+    }
+  },
+  "lib\\zodiac-module-reality": {
+    "tag": {
+      "name": "v2.0.0",
+      "rev": "95e1251efb9783c224782a629b4f59330e8104a6"
+    }
   }
 }

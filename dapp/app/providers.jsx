@@ -22,7 +22,7 @@ import { usePrivy, useWallets } from '@privy-io/react-auth';
  * Syncs Privy wallet with Wagmi
  */
 function WalletSync() {
-  const { isConnected } = useAccount();
+  const { isConnected, connector } = useAccount();
   const { authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
   const { connect, status } = useConnect();
@@ -40,7 +40,7 @@ function WalletSync() {
           console.error('WalletSync: Sync failed', e);
         }
       }
-      if (ready && !authenticated && isConnected) {
+      if (ready && !authenticated && isConnected && connector?.id === 'privy') {
         console.log('WalletSync: Privy logged out, disconnecting Wagmi...');
         disconnect();
       }
